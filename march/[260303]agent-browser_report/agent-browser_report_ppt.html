@@ -1,0 +1,768 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>agent-browser 분석 보고서 발표</title>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600;700&family=Fira+Sans:wght@300;400;500;600;700&display=swap');
+
+    :root {
+      --bg: #f8fafc;
+      --text: #334155;
+      --muted: #64748b;
+      --soft: #94a3b8;
+      --cta: #f97316;
+      --card: #ffffff;
+      --line: #cbd5e1;
+      --ok: #0f766e;
+      --warn: #b45309;
+      --danger: #b91c1c;
+    }
+
+    * { box-sizing: border-box; }
+
+    html, body {
+      margin: 0;
+      width: 100%;
+      height: 100%;
+      background: radial-gradient(circle at 10% 10%, #e2e8f0 0%, #f8fafc 45%) fixed;
+      color: var(--text);
+      font-family: 'Fira Sans', sans-serif;
+      overflow: hidden;
+    }
+
+    .deck {
+      position: relative;
+      width: 100vw;
+      height: 100vh;
+    }
+
+    .slide {
+      display: none;
+      width: 100%;
+      height: 100%;
+      padding: 4rem 5rem 5rem;
+      position: absolute;
+      inset: 0;
+      overflow: auto;
+      background:
+        linear-gradient(135deg, rgba(100, 116, 139, 0.08), rgba(248, 250, 252, 0.85)),
+        repeating-linear-gradient(
+          90deg,
+          rgba(148, 163, 184, 0.08) 0,
+          rgba(148, 163, 184, 0.08) 1px,
+          transparent 1px,
+          transparent 28px
+        );
+      animation: fadeIn 260ms ease;
+    }
+
+    .slide.active { display: block; }
+
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(10px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    h1, h2, h3 {
+      margin: 0 0 0.9rem;
+      line-height: 1.15;
+      letter-spacing: -0.02em;
+    }
+
+    h1 {
+      font-size: clamp(2rem, 3.7vw, 3.4rem);
+      font-weight: 700;
+    }
+
+    h2 {
+      font-size: clamp(1.45rem, 2.4vw, 2.3rem);
+      font-weight: 700;
+    }
+
+    h3 {
+      font-size: clamp(1rem, 1.7vw, 1.35rem);
+      font-weight: 600;
+    }
+
+    p, li {
+      font-size: clamp(0.95rem, 1.15vw, 1.12rem);
+      line-height: 1.6;
+    }
+
+    .kicker {
+      font-family: 'Fira Code', monospace;
+      font-size: 0.85rem;
+      color: var(--muted);
+      margin-bottom: 0.9rem;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+    }
+
+    .subtitle {
+      color: var(--muted);
+      max-width: 80ch;
+      margin-bottom: 1.4rem;
+    }
+
+    .grid-2 {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 1rem;
+    }
+
+    .grid-3 {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 1rem;
+    }
+
+    .card {
+      background: linear-gradient(180deg, #fff, #f8fafc);
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      padding: 1rem 1.1rem;
+      box-shadow: 0 8px 22px rgba(15, 23, 42, 0.08);
+    }
+
+    .metric {
+      font-family: 'Fira Code', monospace;
+      font-size: clamp(1.4rem, 2.5vw, 2.2rem);
+      font-weight: 700;
+      color: #0f172a;
+      margin-bottom: 0.35rem;
+    }
+
+    .label {
+      color: var(--muted);
+      font-size: 0.88rem;
+    }
+
+    .tag {
+      display: inline-block;
+      font-family: 'Fira Code', monospace;
+      font-size: 0.75rem;
+      background: #e2e8f0;
+      color: #1e293b;
+      border: 1px solid #cbd5e1;
+      padding: 0.2rem 0.45rem;
+      border-radius: 8px;
+      margin-right: 0.35rem;
+      margin-bottom: 0.35rem;
+    }
+
+    .flow {
+      display: flex;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 0.55rem;
+      margin-top: 0.8rem;
+    }
+
+    .node {
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 0.55rem 0.72rem;
+      font-weight: 600;
+      font-size: 0.92rem;
+    }
+
+    .arrow {
+      color: var(--soft);
+      font-weight: 700;
+      font-family: 'Fira Code', monospace;
+    }
+
+    .table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.93rem;
+      margin-top: 0.5rem;
+      background: #fff;
+      border-radius: 12px;
+      overflow: hidden;
+      border: 1px solid var(--line);
+    }
+
+    .table th,
+    .table td {
+      text-align: left;
+      padding: 0.62rem 0.65rem;
+      border-bottom: 1px solid #e2e8f0;
+      vertical-align: top;
+    }
+
+    .table th {
+      background: #f1f5f9;
+      font-size: 0.8rem;
+      font-family: 'Fira Code', monospace;
+      color: #0f172a;
+    }
+
+    .table tr:last-child td { border-bottom: none; }
+
+    .bars {
+      margin-top: 0.8rem;
+      display: grid;
+      gap: 0.56rem;
+    }
+
+    .bar-row {
+      display: grid;
+      grid-template-columns: 130px 1fr 56px;
+      gap: 0.55rem;
+      align-items: center;
+      font-size: 0.87rem;
+    }
+
+    .bar-track {
+      height: 12px;
+      background: #e2e8f0;
+      border-radius: 999px;
+      overflow: hidden;
+    }
+
+    .bar {
+      height: 100%;
+      background: linear-gradient(90deg, #64748b, #f97316);
+      border-radius: 999px;
+    }
+
+    .two-col-list {
+      columns: 2;
+      column-gap: 2rem;
+      margin: 0;
+      padding-left: 1.05rem;
+    }
+
+    .status-good { color: var(--ok); font-weight: 600; }
+    .status-warn { color: var(--warn); font-weight: 600; }
+    .status-risk { color: var(--danger); font-weight: 600; }
+
+    .footer {
+      position: fixed;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      height: 46px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 1rem;
+      background: rgba(248, 250, 252, 0.84);
+      border-top: 1px solid #cbd5e1;
+      backdrop-filter: blur(8px);
+    }
+
+    .controls {
+      display: flex;
+      align-items: center;
+      gap: 0.45rem;
+    }
+
+    button {
+      border: 1px solid #cbd5e1;
+      background: #fff;
+      color: #0f172a;
+      border-radius: 10px;
+      padding: 0.38rem 0.66rem;
+      font-family: 'Fira Code', monospace;
+      font-size: 0.78rem;
+      cursor: pointer;
+      transition: background 180ms ease, color 180ms ease, transform 180ms ease;
+    }
+
+    button:hover {
+      background: #0f172a;
+      color: #f8fafc;
+      transform: translateY(-1px);
+    }
+
+    .counter {
+      font-family: 'Fira Code', monospace;
+      font-size: 0.84rem;
+      color: #334155;
+    }
+
+    .progress {
+      position: fixed;
+      bottom: 46px;
+      left: 0;
+      height: 4px;
+      width: 100%;
+      background: #e2e8f0;
+    }
+
+    .progress > span {
+      display: block;
+      height: 100%;
+      width: 0;
+      background: linear-gradient(90deg, #64748b, #f97316);
+      transition: width 200ms ease;
+    }
+
+    .mono { font-family: 'Fira Code', monospace; }
+
+    .title-accent {
+      color: #0f172a;
+      border-left: 8px solid var(--cta);
+      padding-left: 0.6rem;
+    }
+
+    @media (max-width: 980px) {
+      .slide { padding: 2.4rem 1.1rem 4.2rem; }
+      .grid-2, .grid-3 { grid-template-columns: 1fr; }
+      .bar-row { grid-template-columns: 95px 1fr 44px; }
+      .two-col-list { columns: 1; }
+    }
+
+    @media print {
+      html, body { overflow: visible; }
+      .slide {
+        display: block !important;
+        position: static;
+        page-break-after: always;
+        height: auto;
+        min-height: 100vh;
+      }
+      .footer, .progress { display: none; }
+    }
+  </style>
+</head>
+<body>
+  <div class="deck" id="deck">
+    <section class="slide active">
+      <div class="kicker">Agent Browser / Analysis Deck</div>
+      <h1 class="title-accent">agent-browser 아키텍처 분석 발표</h1>
+      <p class="subtitle">
+        vercel-labs/agent-browser 레포 분석 결과를 발표용으로 재구성한 HTML PPT입니다.
+        핵심 질문은 하나입니다: <span class="mono">"이 레포는 무엇을 자동화하고, 어떻게 안정적으로 실행하는가"</span>.
+      </p>
+      <div class="grid-3">
+        <div class="card">
+          <div class="metric">141</div>
+          <div class="label">총 파일 수</div>
+        </div>
+        <div class="card">
+          <div class="metric">134</div>
+          <div class="label">실행 액션 수 (`dispatchAction`)</div>
+        </div>
+        <div class="card">
+          <div class="metric">4</div>
+          <div class="label">에이전트성 핵심 모듈</div>
+        </div>
+      </div>
+      <div style="margin-top:1.1rem" class="card">
+        <div class="tag">분석일 2026-03-03</div>
+        <div class="tag">Repo https://github.com/vercel-labs/agent-browser</div>
+        <div class="tag">보고서 소스: /agent-browser_report</div>
+      </div>
+    </section>
+
+    <section class="slide">
+      <div class="kicker">Agenda</div>
+      <h2>발표 목차</h2>
+      <div class="grid-2">
+        <div class="card">
+          <h3>1. 시스템 이해</h3>
+          <ul>
+            <li>레포 목적과 사용자 가치</li>
+            <li>상위 구조와 책임 분리</li>
+            <li>에이전트/프롬프트 구성</li>
+          </ul>
+        </div>
+        <div class="card">
+          <h3>2. 실행 메커니즘</h3>
+          <ul>
+            <li>CLI → 데몬 → 액션 디스패치</li>
+            <li>브라우저/모바일 경로</li>
+            <li>정책/보안 게이팅</li>
+          </ul>
+        </div>
+      </div>
+      <div class="card" style="margin-top:1rem">
+        <h3>3. 운영 관점 결론</h3>
+        <ul>
+          <li>강점: 실행 안정성, 관측성, 크로스플랫폼</li>
+          <li>리스크: 액션 폭 확장에 따른 유지보수 비용</li>
+          <li>개선: 모듈 분리 + 문서 자동화 + 정책 템플릿</li>
+        </ul>
+      </div>
+    </section>
+
+    <section class="slide">
+      <div class="kicker">Overview</div>
+      <h2>이 시스템은 무엇인가?</h2>
+      <p class="subtitle">
+        "웹 브라우저 조종 로봇"에 가깝습니다. 사람이 하는 브라우저 작업을 명령으로 변환해
+        백그라운드 데몬이 실행하고, 결과를 구조화된 JSON으로 반환합니다.
+      </p>
+
+      <div class="card">
+        <h3>핵심 실행 루프</h3>
+        <div class="flow">
+          <div class="node">사용자/LLM 명령</div>
+          <div class="arrow">→</div>
+          <div class="node">Rust CLI 파싱</div>
+          <div class="arrow">→</div>
+          <div class="node">daemon.ts 큐 처리</div>
+          <div class="arrow">→</div>
+          <div class="node">actions.ts 핸들러</div>
+          <div class="arrow">→</div>
+          <div class="node">Playwright / iOS 실행</div>
+          <div class="arrow">→</div>
+          <div class="node">JSON 응답</div>
+        </div>
+      </div>
+
+      <div class="grid-3" style="margin-top:1rem">
+        <div class="card"><h3>src/</h3><p>daemon, actions, browser, snapshot, diff 핵심 엔진</p></div>
+        <div class="card"><h3>cli/src/</h3><p>Rust 명령 파서/소켓 연결기</p></div>
+        <div class="card"><h3>docs + skills</h3><p>문서 챗봇과 에이전트용 지시문</p></div>
+      </div>
+    </section>
+
+    <section class="slide">
+      <div class="kicker">Architecture</div>
+      <h2>레이어 구조</h2>
+      <div class="grid-2">
+        <div class="card">
+          <h3>입력 계층</h3>
+          <p><span class="mono">cli/src/main.rs</span>, <span class="mono">commands.rs</span></p>
+          <p>명령 문자열을 JSON Command로 표준화</p>
+        </div>
+        <div class="card">
+          <h3>처리 계층</h3>
+          <p><span class="mono">src/daemon.ts</span>, <span class="mono">actions.ts</span>, <span class="mono">action-policy.ts</span></p>
+          <p>큐 직렬화 + 정책 체크 + 핸들러 디스패치</p>
+        </div>
+      </div>
+      <div class="grid-2" style="margin-top:1rem">
+        <div class="card">
+          <h3>실행 계층</h3>
+          <p><span class="mono">BrowserManager</span> / <span class="mono">IOSManager</span></p>
+          <p>Playwright, Appium/WebDriverIO로 실제 브라우저 제어</p>
+        </div>
+        <div class="card">
+          <h3>선택적 AI 계층</h3>
+          <p><span class="mono">docs-chat route.ts</span>, <span class="mono">dogfood.eval.ts</span></p>
+          <p>LLM을 통한 문서 응답/평가 자동화</p>
+        </div>
+      </div>
+      <div class="card" style="margin-top:1rem">
+        <h3>설계 포인트</h3>
+        <p>입력(파싱)과 실행(브라우저 조작)을 분리해 안정성/확장성/성능을 동시에 확보.</p>
+      </div>
+    </section>
+
+    <section class="slide">
+      <div class="kicker">Execution Flow</div>
+      <h2>명령 1건 처리 시퀀스</h2>
+      <div class="card">
+        <div class="flow">
+          <div class="node">agent-browser click @e1</div>
+          <div class="arrow">→</div>
+          <div class="node">CLI가 JSON 생성</div>
+          <div class="arrow">→</div>
+          <div class="node">소켓으로 daemon 전달</div>
+          <div class="arrow">→</div>
+          <div class="node">policy allow/deny/confirm</div>
+          <div class="arrow">→</div>
+          <div class="node">handleClick 실행</div>
+          <div class="arrow">→</div>
+          <div class="node">response 반환</div>
+        </div>
+      </div>
+
+      <div class="grid-2" style="margin-top:1rem">
+        <div class="card">
+          <h3>신뢰성 포인트</h3>
+          <ul>
+            <li>명령 큐 직렬 처리로 충돌 완화</li>
+            <li>transient error 재시도 로직</li>
+            <li>auto-launch/ensure-daemon</li>
+          </ul>
+        </div>
+        <div class="card">
+          <h3>보안 포인트</h3>
+          <ul>
+            <li>action-policy 기반 실행 제어</li>
+            <li>confirm queue (위험 액션 보류)</li>
+            <li>stream origin 제한 (localhost/file)</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <section class="slide">
+      <div class="kicker">Agent Modules</div>
+      <h2>에이전트성 모듈 구성</h2>
+      <p class="subtitle">멀티 에이전트 프레임워크라기보다는, 에이전트가 쓰는 "실행 인프라"가 중심입니다.</p>
+
+      <table class="table">
+        <thead>
+          <tr><th>모듈</th><th>핵심 책임</th><th>입력</th><th>출력</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>daemon.ts</td><td>오케스트레이션, 세션 관리, auto-launch</td><td>JSON command</td><td>JSON response</td></tr>
+          <tr><td>BrowserManager</td><td>데스크톱 브라우저 액션 실행</td><td>action payload</td><td>실행 결과/파일</td></tr>
+          <tr><td>IOSManager</td><td>iOS Safari 자동화 실행</td><td>action payload</td><td>모바일 실행 결과</td></tr>
+          <tr><td>docs-chat assistant</td><td>문서 기반 QA 응답</td><td>UI messages</td><td>LLM streamed answer</td></tr>
+        </tbody>
+      </table>
+
+      <div class="card" style="margin-top:1rem">
+        <h3>핵심 해석</h3>
+        <p>이 레포의 본체는 "도구 실행기"이며, 에이전트는 그 위에 탑승하는 소비자입니다.</p>
+      </div>
+    </section>
+
+    <section class="slide">
+      <div class="kicker">Prompt Topology</div>
+      <h2>프롬프트/지시문 구조</h2>
+      <div class="grid-2">
+        <div class="card">
+          <h3>핵심 소스</h3>
+          <ul>
+            <li><span class="mono">docs/src/app/api/docs-chat/route.ts</span> (SYSTEM_PROMPT)</li>
+            <li><span class="mono">skills/*/SKILL.md</span> 4개</li>
+            <li><span class="mono">test/e2e/dogfood.eval.ts</span> (instruction 템플릿)</li>
+          </ul>
+        </div>
+        <div class="card">
+          <h3>핵심 규칙</h3>
+          <ul>
+            <li>docs-chat은 read-only bash/readFile 중심</li>
+            <li>스킬 문서는 절차형 실행 가이드</li>
+            <li>dogfood eval은 SKILL.md를 읽고 실행</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="card" style="margin-top:1rem">
+        <h3>프롬프트 흐름</h3>
+        <div class="flow">
+          <div class="node">User Question</div><div class="arrow">→</div>
+          <div class="node">SYSTEM_PROMPT</div><div class="arrow">→</div>
+          <div class="node">bash/readFile context</div><div class="arrow">→</div>
+          <div class="node">Grounded Answer</div>
+        </div>
+      </div>
+    </section>
+
+    <section class="slide">
+      <div class="kicker">Tools Surface</div>
+      <h2>툴(액션) 표면적과 카테고리</h2>
+      <p class="subtitle">`actions.ts`는 134개 case를 중앙 디스패처로 운영합니다.</p>
+
+      <div class="grid-2">
+        <div class="card">
+          <h3>주요 액션 그룹</h3>
+          <div class="tag">navigate</div><div class="tag">click/fill/interact</div><div class="tag">snapshot/screenshot</div>
+          <div class="tag">state/cookies/storage</div><div class="tag">network route</div><div class="tag">diff/profiler/trace</div>
+          <p style="margin-top:.8rem">`@tool` 데코레이터 대신 <span class="mono">switch dispatch</span> 기반으로 명시적 제어.</p>
+        </div>
+        <div class="card">
+          <h3>action-policy 카테고리 분포(핵심)</h3>
+          <div class="bars">
+            <div class="bar-row"><span>_internal</span><div class="bar-track"><div class="bar" style="width:100%"></div></div><span>58</span></div>
+            <div class="bar-row"><span>get</span><div class="bar-track"><div class="bar" style="width:40%"></div></div><span>23</span></div>
+            <div class="bar-row"><span>fill</span><div class="bar-track"><div class="bar" style="width:19%"></div></div><span>11</span></div>
+            <div class="bar-row"><span>interact</span><div class="bar-track"><div class="bar" style="width:19%"></div></div><span>11</span></div>
+            <div class="bar-row"><span>eval</span><div class="bar-track"><div class="bar" style="width:12%"></div></div><span>7</span></div>
+            <div class="bar-row"><span>snapshot</span><div class="bar-track"><div class="bar" style="width:10%"></div></div><span>6</span></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="slide">
+      <div class="kicker">Workflow Reliability</div>
+      <h2>운영 관점 워크플로우</h2>
+      <div class="card">
+        <h3>메인 파이프라인</h3>
+        <div class="flow">
+          <div class="node">Parse</div><div class="arrow">→</div>
+          <div class="node">Ensure Daemon</div><div class="arrow">→</div>
+          <div class="node">Queue Serialize</div><div class="arrow">→</div>
+          <div class="node">Policy Gate</div><div class="arrow">→</div>
+          <div class="node">Execute</div><div class="arrow">→</div>
+          <div class="node">Respond</div>
+        </div>
+      </div>
+      <div class="grid-2" style="margin-top:1rem">
+        <div class="card">
+          <h3>오류 처리</h3>
+          <ul>
+            <li>일시 오류(EAGAIN/EOF/Connection reset) 재시도</li>
+            <li>비일시 오류는 즉시 실패 반환</li>
+            <li>close 시 상태 자동 저장(autoState)</li>
+          </ul>
+        </div>
+        <div class="card">
+          <h3>학습 가능한 패턴</h3>
+          <ul>
+            <li>명령-실행 분리 아키텍처</li>
+            <li>snapshot-ref 반복 루프</li>
+            <li>정책 기반 실행 제어</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <section class="slide">
+      <div class="kicker">Tech Stack</div>
+      <h2>기술 스택 요약</h2>
+      <div class="grid-3">
+        <div class="card">
+          <h3>Core Runtime</h3>
+          <p><span class="mono">TypeScript + Node.js</span></p>
+          <p>daemon/actions/browser 구현</p>
+        </div>
+        <div class="card">
+          <h3>CLI Layer</h3>
+          <p><span class="mono">Rust CLI</span></p>
+          <p>빠른 파싱, 소켓 통신, UX 출력</p>
+        </div>
+        <div class="card">
+          <h3>Automation</h3>
+          <p><span class="mono">Playwright Core</span></p>
+          <p>데스크톱 + iOS(Appium/WebDriverIO)</p>
+        </div>
+      </div>
+
+      <table class="table" style="margin-top:1rem">
+        <thead><tr><th>영역</th><th>주요 라이브러리</th><th>버전/메모</th></tr></thead>
+        <tbody>
+          <tr><td>브라우저 자동화</td><td>playwright-core</td><td>^1.57.0</td></tr>
+          <tr><td>iOS 자동화</td><td>webdriverio, node-simctl</td><td>^9.15.0, ^7.4.0</td></tr>
+          <tr><td>스키마 검증</td><td>zod</td><td>^3.22.4</td></tr>
+          <tr><td>Docs App</td><td>Next.js, React</td><td>16.1.1, 19.2.3</td></tr>
+          <tr><td>LLM</td><td>Vercel AI SDK, Claude Agent SDK</td><td>docs-chat / dogfood eval</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section class="slide">
+      <div class="kicker">Insights</div>
+      <h2>핵심 인사이트</h2>
+      <div class="grid-2">
+        <div class="card">
+          <h3>강점</h3>
+          <ul>
+            <li>CLI-데몬 분리로 성능/확장성 확보</li>
+            <li>Ref 기반 상호작용으로 LLM 안정성 강화</li>
+            <li>보안 장치(action policy, origin/session 검증)</li>
+            <li>관측성 도구(screenshot/video/diff/trace) 풍부</li>
+          </ul>
+        </div>
+        <div class="card">
+          <h3>주의점</h3>
+          <ul>
+            <li>134개 액션의 유지보수 비용 증가</li>
+            <li>프롬프트 소스 분산(docs-chat/skills/eval)</li>
+            <li>iOS/Appium/Xcode 환경 의존성</li>
+            <li>멀티 에이전트 엔진으로 오해 가능</li>
+          </ul>
+        </div>
+      </div>
+      <div class="card" style="margin-top:1rem">
+        <h3>결론 한 줄</h3>
+        <p><strong>agent-browser는 "에이전트를 위한 브라우저 실행 플랫폼"이며, 명령-정책-실행 분리 구조가 기술적 핵심입니다.</strong></p>
+      </div>
+    </section>
+
+    <section class="slide">
+      <div class="kicker">Roadmap</div>
+      <h2>개선 제안 (우선순위)</h2>
+      <table class="table">
+        <thead><tr><th>우선순위</th><th>제안</th><th>기대효과</th></tr></thead>
+        <tbody>
+          <tr><td><span class="status-risk">높음</span></td><td>actions.ts 카테고리별 모듈 분리 + 자동 문서 생성</td><td>변경 안정성, 온보딩 속도 향상</td></tr>
+          <tr><td><span class="status-risk">높음</span></td><td>프롬프트 정책 템플릿 통합(docs-chat/skills/eval)</td><td>지시문 일관성, 품질 안정화</td></tr>
+          <tr><td><span class="status-warn">중간</span></td><td>action policy preset(strict/balanced/open)</td><td>보안 설정 초기 진입장벽 완화</td></tr>
+          <tr><td><span class="status-warn">중간</span></td><td>iOS doctor/진단 커맨드 강화</td><td>환경 이슈 조기 탐지</td></tr>
+          <tr><td><span class="status-good">낮음</span></td><td>운영 대시보드(세션/큐/재시도 통계)</td><td>운영 가시성 향상</td></tr>
+        </tbody>
+      </table>
+
+      <div class="card" style="margin-top:1rem">
+        <h3>발표 종료</h3>
+        <p>원본 보고서: <span class="mono">/Users/mingukjang/Documents/Obsidian Vault/mgjang_claw/agent-browser_report</span></p>
+        <p>이 파일은 브라우저에서 바로 발표 가능하며, <span class="mono">Ctrl/Cmd+P</span>로 PDF 출력도 가능합니다.</p>
+      </div>
+    </section>
+  </div>
+
+  <div class="progress"><span id="progressBar"></span></div>
+  <div class="footer">
+    <div class="controls">
+      <button id="prevBtn" aria-label="이전 슬라이드">Prev</button>
+      <button id="nextBtn" aria-label="다음 슬라이드">Next</button>
+    </div>
+    <div class="counter" id="counter">1 / 12</div>
+    <div class="controls">
+      <button id="fullscreenBtn" aria-label="전체화면">Fullscreen</button>
+    </div>
+  </div>
+
+  <script>
+    (function () {
+      const slides = Array.from(document.querySelectorAll('.slide'));
+      const counter = document.getElementById('counter');
+      const progressBar = document.getElementById('progressBar');
+      const prevBtn = document.getElementById('prevBtn');
+      const nextBtn = document.getElementById('nextBtn');
+      const fsBtn = document.getElementById('fullscreenBtn');
+
+      let index = 0;
+
+      function render() {
+        slides.forEach((s, i) => s.classList.toggle('active', i === index));
+        counter.textContent = (index + 1) + ' / ' + slides.length;
+        const ratio = ((index + 1) / slides.length) * 100;
+        progressBar.style.width = ratio + '%';
+      }
+
+      function next() {
+        index = Math.min(index + 1, slides.length - 1);
+        render();
+      }
+
+      function prev() {
+        index = Math.max(index - 1, 0);
+        render();
+      }
+
+      prevBtn.addEventListener('click', prev);
+      nextBtn.addEventListener('click', next);
+
+      document.addEventListener('keydown', (e) => {
+        if (e.key === 'ArrowRight' || e.key === 'PageDown' || e.key === ' ') {
+          e.preventDefault();
+          next();
+        }
+        if (e.key === 'ArrowLeft' || e.key === 'PageUp') {
+          e.preventDefault();
+          prev();
+        }
+        if (e.key.toLowerCase() === 'f') {
+          if (!document.fullscreenElement) document.documentElement.requestFullscreen();
+          else document.exitFullscreen();
+        }
+        if (e.key === 'Home') { index = 0; render(); }
+        if (e.key === 'End') { index = slides.length - 1; render(); }
+      });
+
+      fsBtn.addEventListener('click', () => {
+        if (!document.fullscreenElement) document.documentElement.requestFullscreen();
+        else document.exitFullscreen();
+      });
+
+      render();
+    })();
+  </script>
+</body>
+</html>

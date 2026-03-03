@@ -1,0 +1,1019 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Agentic Workflow 5분 의사결정 브리핑</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Sora:wght@500;700;800&family=Noto+Sans+KR:wght@400;500;700&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg: #f6f9ff;
+      --paper: rgba(255, 255, 255, 0.9);
+      --ink: #0f172a;
+      --muted: #475569;
+      --line: #dbe7ff;
+      --primary: #0b6bcb;
+      --secondary: #0ea5e9;
+      --accent: #f97316;
+      --ok: #059669;
+      --warn: #b45309;
+      --danger: #b91c1c;
+      --shadow: 0 18px 48px rgba(15, 23, 42, 0.12);
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      color: var(--ink);
+      font-family: "Noto Sans KR", sans-serif;
+      background:
+        radial-gradient(circle at 12% 10%, #dbeafe 0%, transparent 36%),
+        radial-gradient(circle at 88% 85%, #ffedd5 0%, transparent 30%),
+        linear-gradient(150deg, #f8fbff 0%, #eef4ff 52%, #fef7ed 100%);
+      overflow: hidden;
+    }
+
+    .deck {
+      height: 100vh;
+      width: 100vw;
+      position: relative;
+    }
+
+    .slide {
+      position: absolute;
+      inset: 0;
+      padding: 46px 56px 92px;
+      display: grid;
+      grid-template-rows: auto 1fr;
+      gap: 18px;
+      opacity: 0;
+      transform: translateX(20px) scale(0.99);
+      pointer-events: none;
+      transition: opacity 240ms ease, transform 240ms ease;
+    }
+
+    .slide.active {
+      opacity: 1;
+      transform: translateX(0) scale(1);
+      pointer-events: auto;
+    }
+
+    .kicker {
+      font-family: "Sora", sans-serif;
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.14em;
+      color: var(--primary);
+      font-weight: 700;
+      margin-bottom: 6px;
+    }
+
+    h1, h2, h3 {
+      margin: 0;
+      font-family: "Sora", sans-serif;
+      line-height: 1.1;
+      letter-spacing: -0.01em;
+    }
+
+    h1 { font-size: clamp(34px, 5.2vw, 60px); }
+    h2 { font-size: clamp(25px, 3.5vw, 40px); }
+    h3 { font-size: clamp(17px, 2.2vw, 24px); }
+
+    p { margin: 0; }
+
+    .sub {
+      font-size: clamp(14px, 1.75vw, 20px);
+      line-height: 1.6;
+      color: var(--muted);
+      max-width: 90ch;
+    }
+
+    .time {
+      display: inline-block;
+      margin-top: 10px;
+      font-size: 12px;
+      font-weight: 700;
+      color: #fff;
+      background: linear-gradient(135deg, var(--primary), var(--secondary));
+      border-radius: 999px;
+      padding: 6px 11px;
+      letter-spacing: 0.03em;
+    }
+
+    .card {
+      background: var(--paper);
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      padding: 16px;
+      box-shadow: var(--shadow);
+      backdrop-filter: blur(6px);
+    }
+
+    .grid-2 {
+      display: grid;
+      grid-template-columns: 1.1fr 1fr;
+      gap: 16px;
+    }
+
+    .grid-3 {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 12px;
+    }
+
+    .chip-wrap {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: 10px;
+    }
+
+    .chip {
+      border-radius: 999px;
+      border: 1px solid #bfdbfe;
+      background: #eff6ff;
+      color: #1d4ed8;
+      font-size: 12px;
+      font-weight: 700;
+      padding: 6px 10px;
+    }
+
+    .alert {
+      border-radius: 12px;
+      border: 1px solid #fed7aa;
+      background: #fff7ed;
+      color: #9a3412;
+      font-size: 13px;
+      line-height: 1.5;
+      padding: 11px 12px;
+      margin-top: 12px;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 13px;
+      line-height: 1.45;
+    }
+
+    th, td {
+      border-bottom: 1px solid #e3ecff;
+      padding: 10px 8px;
+      text-align: left;
+      vertical-align: top;
+    }
+
+    th {
+      background: #edf4ff;
+      color: #1e3a8a;
+      font-family: "Sora", sans-serif;
+      font-size: 12px;
+    }
+
+    tr:last-child td { border-bottom: 0; }
+
+    .score-badge {
+      font-size: 11px;
+      font-weight: 700;
+      border-radius: 999px;
+      padding: 4px 8px;
+      display: inline-block;
+      border: 1px solid transparent;
+      cursor: help;
+      user-select: none;
+    }
+
+    .score-badge:hover,
+    .score-badge:focus-visible {
+      border-color: #60a5fa;
+      outline: none;
+      box-shadow: 0 0 0 2px rgba(96, 165, 250, 0.22);
+    }
+
+    .high { background: #dcfce7; color: #166534; }
+    .mid { background: #fef3c7; color: #92400e; }
+    .low { background: #fee2e2; color: #991b1b; }
+
+    .score-modal {
+      position: fixed;
+      z-index: 999;
+      width: min(360px, calc(100vw - 24px));
+      right: 12px;
+      top: 88px;
+      border: 1px solid #bfdbfe;
+      border-radius: 14px;
+      background: rgba(255, 255, 255, 0.98);
+      box-shadow: 0 18px 40px rgba(15, 23, 42, 0.2);
+      padding: 12px 12px 10px;
+      opacity: 0;
+      transform: translateY(6px) scale(0.98);
+      pointer-events: none;
+      transition: opacity 140ms ease, transform 140ms ease;
+    }
+
+    .score-modal.show {
+      opacity: 1;
+      transform: translateY(0) scale(1);
+    }
+
+    .score-modal .title {
+      font-family: "Sora", sans-serif;
+      font-size: 13px;
+      color: #1e3a8a;
+      margin-bottom: 5px;
+    }
+
+    .score-modal .body {
+      font-size: 13px;
+      color: #334155;
+      line-height: 1.52;
+    }
+
+    .list {
+      display: grid;
+      gap: 8px;
+      margin-top: 8px;
+      font-size: 14px;
+      color: #334155;
+      line-height: 1.5;
+    }
+
+    .list-item {
+      border: 1px solid #dbe7ff;
+      border-radius: 10px;
+      background: #f8fbff;
+      padding: 9px 10px;
+    }
+
+    .mermaid-wrap {
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      background: #fff;
+      padding: 8px;
+      box-shadow: var(--shadow);
+      min-height: 340px;
+      display: grid;
+      place-items: center;
+      overflow: auto;
+    }
+
+    .mermaid {
+      width: 100%;
+      font-size: 15px;
+    }
+
+    .timeline {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 12px;
+      margin-top: 8px;
+    }
+
+    .phase {
+      border: 1px solid #dbe7ff;
+      border-radius: 12px;
+      background: #fff;
+      padding: 12px;
+    }
+
+    .phase h3 {
+      font-size: 16px;
+      color: #1e3a8a;
+      margin-bottom: 6px;
+    }
+
+    .footer {
+      position: absolute;
+      left: 24px;
+      right: 24px;
+      bottom: 18px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .controls { display: flex; gap: 8px; }
+
+    button {
+      border: 1px solid #c7dafc;
+      border-radius: 10px;
+      padding: 8px 12px;
+      background: #fff;
+      color: #1e3a8a;
+      cursor: pointer;
+      font-family: "Sora", sans-serif;
+      font-weight: 700;
+      min-width: 78px;
+    }
+
+    button:focus-visible {
+      outline: 2px solid var(--accent);
+      outline-offset: 2px;
+    }
+
+    .progress {
+      flex: 1;
+      height: 8px;
+      border-radius: 999px;
+      background: #dbe7ff;
+      overflow: hidden;
+    }
+
+    .progress > span {
+      display: block;
+      height: 100%;
+      width: 0;
+      background: linear-gradient(90deg, var(--primary), var(--accent));
+      transition: width 220ms ease;
+    }
+
+    .counter {
+      min-width: 68px;
+      text-align: right;
+      font-size: 12px;
+      font-family: "Sora", sans-serif;
+      color: #1e3a8a;
+    }
+
+    .decision {
+      display: grid;
+      gap: 10px;
+      margin-top: 10px;
+    }
+
+    .decision .item {
+      border-left: 4px solid #1d4ed8;
+      background: #f8fbff;
+      border-radius: 10px;
+      padding: 10px 12px;
+      font-size: 14px;
+      line-height: 1.5;
+    }
+
+    @media (max-width: 1024px) {
+      .slide { padding: 28px 18px 86px; }
+      .grid-2, .grid-3, .timeline { grid-template-columns: 1fr; }
+      .mermaid-wrap { min-height: 260px; }
+      table { font-size: 12px; }
+      th, td { padding: 8px 6px; }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after {
+        animation: none !important;
+        transition: none !important;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main class="deck" aria-label="Agentic Workflow 5-minute executive deck">
+
+    <section class="slide active">
+      <header>
+        <div class="kicker">Executive Brief · 5 Minutes</div>
+        <h1>7개 프로젝트 비교로 도출한<br>Best Agent Workflow 제안</h1>
+        <p class="sub">대상: <code>browser-use</code>, <code>skyvern</code>, <code>agent-browser</code>, <code>openmanus</code>, <code>ui-tars</code>, <code>openclaw</code>, <code>opencua</code></p>
+        <span class="time">20초</span>
+      </header>
+      <div class="grid-2">
+        <article class="card">
+          <h3>이번 발표의 답</h3>
+          <div class="list">
+            <div class="list-item"><strong>결론:</strong> 단일 제품 채택이 아니라, 7개의 장점을 조합한 <strong>하이브리드 워크플로우</strong>가 최적</div>
+            <div class="list-item"><strong>핵심 구조:</strong> Agent loop + plan_update + Tools.act + BrowserSession + Guardrail + Judge</div>
+            <div class="list-item"><strong>목표:</strong> 90일 내 운영 가능한 자동화 에이전트 체계 구축</div>
+          </div>
+        </article>
+        <article class="card">
+          <h3>오늘 승인받을 3가지</h3>
+          <div class="decision">
+            <div class="item">1. Best Workflow 아키텍처 방향 승인</div>
+            <div class="item">2. 30/60/90 단계적 도입 계획 승인</div>
+            <div class="item">3. KPI 기반 운영 전환(성공률/리스크 지표) 승인</div>
+          </div>
+        </article>
+      </div>
+    </section>
+
+    <section class="slide">
+      <header>
+        <div class="kicker">Why Now</div>
+        <h2>지금 표준 아키텍처를 정해야 하는 이유</h2>
+        <span class="time">25초</span>
+      </header>
+      <div class="grid-2">
+        <article class="card">
+          <h3>현재 문제</h3>
+          <div class="list">
+            <div class="list-item">프로젝트마다 에이전트/툴/종료 기준이 달라 확장 시 충돌</div>
+            <div class="list-item">실패 복구와 정책 통제가 분산되어 운영 리스크 상승</div>
+            <div class="list-item">PoC는 빠르지만, 현업 전환 시 신뢰성/관측성 공백</div>
+          </div>
+        </article>
+        <article class="card">
+          <h3>의사결정 기준(CEO 관점)</h3>
+          <div class="chip-wrap">
+            <span class="chip">실행력</span>
+            <span class="chip">확장성</span>
+            <span class="chip">안전성</span>
+            <span class="chip">운영비용</span>
+          </div>
+          <div class="alert">핵심은 “무엇이 최고인가”가 아니라, “우리 조직에서 가장 낮은 실패율로 운영되는가”입니다.</div>
+        </article>
+      </div>
+    </section>
+
+    <section class="slide">
+      <header>
+        <div class="kicker">Term Standard</div>
+        <h2>용어 통일: browser-use 기준 사전</h2>
+        <span class="time">20초</span>
+      </header>
+      <article class="card">
+        <table>
+          <thead>
+            <tr>
+              <th>표준 용어 (browser-use 기준)</th>
+              <th>기존 표현(혼용)</th>
+              <th>이번 PPT에서의 의미</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Agent loop</td>
+              <td>Orchestrator, Runtime</td>
+              <td>요청을 받고 step를 반복 실행하는 중심 루프</td>
+            </tr>
+            <tr>
+              <td>plan_update</td>
+              <td>Planner, Task Planning</td>
+              <td>다음 step를 갱신하고 재계획하는 판단 단계</td>
+            </tr>
+            <tr>
+              <td>Tools.act</td>
+              <td>Execution Adapter, Executor</td>
+              <td>실제 액션을 실행하는 표준 실행 인터페이스</td>
+            </tr>
+            <tr>
+              <td>BrowserSession</td>
+              <td>Session/Channel Runtime</td>
+              <td>브라우저/세션 상태를 보관하고 복원하는 계층</td>
+            </tr>
+            <tr>
+              <td>Guardrail</td>
+              <td>Policy Gate</td>
+              <td>allow/deny/confirm으로 위험 액션을 통제</td>
+            </tr>
+            <tr>
+              <td>Judge + done()</td>
+              <td>Verifier, Completion Check, Eval</td>
+              <td>성공 종료/실패 종료/재시도 여부를 판정</td>
+            </tr>
+          </tbody>
+        </table>
+      </article>
+    </section>
+
+    <section class="slide">
+      <header>
+        <div class="kicker">One-Glance Comparison</div>
+        <h2>7개 프로젝트 한눈에 비교 (Table)</h2>
+        <span class="time">35초</span>
+      </header>
+      <article class="card">
+        <table>
+          <thead>
+            <tr>
+              <th>프로젝트</th>
+              <th>성격</th>
+              <th>가장 강한 레이어</th>
+              <th>적합한 상황</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>browser-use</td>
+              <td>Agent loop 기준형</td>
+              <td>Agent loop + Judge</td>
+              <td>웹 자동화 PoC, 빠른 학습 시작점</td>
+            </tr>
+            <tr>
+              <td>skyvern</td>
+              <td>plan_update 확장형</td>
+              <td>plan_update 확장 + Workflow Blocks</td>
+              <td>대규모 반복 업무 운영 자동화</td>
+            </tr>
+            <tr>
+              <td>agent-browser</td>
+              <td>Tools.act 확장형</td>
+              <td>Tools.act 확장 + Guardrail</td>
+              <td>상위 에이전트가 있는 실행 전용 계층</td>
+            </tr>
+            <tr>
+              <td>openmanus</td>
+              <td>Agent loop 다중화형</td>
+              <td>Agent loop 다중화 + Router</td>
+              <td>멀티에이전트 실험/확장</td>
+            </tr>
+            <tr>
+              <td>ui-tars</td>
+              <td>GUI 액션 모델</td>
+              <td>Tools 입력(Action) 파싱</td>
+              <td>데스크톱/모바일 GUI 자동화</td>
+            </tr>
+            <tr>
+              <td>openclaw</td>
+              <td>BrowserSession 운영형</td>
+              <td>BrowserSession 운영 확장</td>
+              <td>메신저/멀티채널 통합 업무봇</td>
+            </tr>
+            <tr>
+              <td>opencua</td>
+              <td>Judge Loop 평가형</td>
+              <td>Judge 오프라인 평가 확장</td>
+              <td>모델 성능 검증 및 개선</td>
+            </tr>
+          </tbody>
+        </table>
+      </article>
+    </section>
+
+    <section class="slide">
+      <header>
+        <div class="kicker">Scoreboard</div>
+        <h2>정량/정성 스코어보드 (browser-use 용어축)</h2>
+        <span class="time">35초</span>
+      </header>
+      <article class="card">
+        <p class="sub" style="font-size:13px; margin-bottom:8px;">`상/중/하` 배지에 마우스를 올리거나 탭하면, 평가 근거가 팝업으로 표시됩니다.</p>
+        <table id="scoreboardTable">
+          <thead>
+            <tr>
+              <th>프로젝트</th>
+              <th>실행력</th>
+              <th>오케스트레이션</th>
+              <th>운영 확장성</th>
+              <th>학습/평가</th>
+              <th>한 줄 포지션</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>browser-use</td>
+              <td><span class="score-badge mid">중</span></td>
+              <td><span class="score-badge mid">중</span></td>
+              <td><span class="score-badge mid">중</span></td>
+              <td><span class="score-badge mid">중</span></td>
+              <td>균형형 기준 런타임</td>
+            </tr>
+            <tr>
+              <td>skyvern</td>
+              <td><span class="score-badge mid">중</span></td>
+              <td><span class="score-badge high">상</span></td>
+              <td><span class="score-badge high">상</span></td>
+              <td><span class="score-badge mid">중</span></td>
+              <td>엔터프라이즈 워크플로우 엔진</td>
+            </tr>
+            <tr>
+              <td>agent-browser</td>
+              <td><span class="score-badge high">상</span></td>
+              <td><span class="score-badge low">하</span></td>
+              <td><span class="score-badge mid">중</span></td>
+              <td><span class="score-badge low">하</span></td>
+              <td>고성능 실행기</td>
+            </tr>
+            <tr>
+              <td>openmanus</td>
+              <td><span class="score-badge mid">중</span></td>
+              <td><span class="score-badge high">상</span></td>
+              <td><span class="score-badge high">상</span></td>
+              <td><span class="score-badge mid">중</span></td>
+              <td>멀티모드 에이전트 프레임</td>
+            </tr>
+            <tr>
+              <td>ui-tars</td>
+              <td><span class="score-badge mid">중</span></td>
+              <td><span class="score-badge low">하</span></td>
+              <td><span class="score-badge low">하</span></td>
+              <td><span class="score-badge mid">중</span></td>
+              <td>GUI 액션 파싱 특화</td>
+            </tr>
+            <tr>
+              <td>openclaw</td>
+              <td><span class="score-badge mid">중</span></td>
+              <td><span class="score-badge mid">중</span></td>
+              <td><span class="score-badge high">상</span></td>
+              <td><span class="score-badge low">하</span></td>
+              <td>채널/세션 운영형 플랫폼</td>
+            </tr>
+            <tr>
+              <td>opencua</td>
+              <td><span class="score-badge low">하</span></td>
+              <td><span class="score-badge low">하</span></td>
+              <td><span class="score-badge mid">중</span></td>
+              <td><span class="score-badge high">상</span></td>
+              <td>데이터-모델-평가 루프</td>
+            </tr>
+          </tbody>
+        </table>
+      </article>
+    </section>
+
+    <section class="slide">
+      <header>
+        <div class="kicker">Best-of Extraction</div>
+        <h2>각 프로젝트에서 채택할 핵심 1개씩</h2>
+        <span class="time">40초</span>
+      </header>
+      <div class="grid-3">
+        <article class="card"><h3>browser-use</h3><p class="sub">Agent loop + Judge 기준선</p></article>
+        <article class="card"><h3>skyvern</h3><p class="sub">plan_update 확장 + Block 오케스트레이션</p></article>
+        <article class="card"><h3>agent-browser</h3><p class="sub">Tools.act 실행기 확장 + Guardrail</p></article>
+        <article class="card"><h3>openmanus</h3><p class="sub">Agent loop 다중화 + 역할 라우팅</p></article>
+        <article class="card"><h3>ui-tars</h3><p class="sub">Tools 입력(Action) 포맷 표준화</p></article>
+        <article class="card"><h3>openclaw + opencua</h3><p class="sub">BrowserSession 운영 + Judge 평가 루프</p></article>
+      </div>
+      <article class="card" style="margin-top: 12px;">
+        <div class="alert"><strong>채택 원칙:</strong> 엔진 하나를 고르는 방식이 아니라, "계획-실행-통제-평가"를 레이어별로 조합해야 현업 성공률이 높습니다.</div>
+      </article>
+    </section>
+
+    <section class="slide">
+      <header>
+        <div class="kicker">Target Architecture</div>
+        <h2>Best Agent Workflow 아키텍처 (browser-use 용어 기준)</h2>
+        <span class="time">50초</span>
+      </header>
+      <article class="mermaid-wrap">
+        <pre class="mermaid">
+flowchart TD
+    U[User Input] --> O[Agent loop]
+    O --> P[plan_update]
+    P --> R{route_next_agent}
+
+    R --> BA[Browser Agent]
+    R --> DA[Data Agent]
+    R --> RA[Review Agent]
+
+    BA --> G[Guardrail]
+    DA --> G
+    RA --> G
+
+    G --> X[ToolsAct Adapter<br/>Playwright-agent-browser]
+    X --> S[AgentHistory and browser_state and artifacts]
+    S --> V[Judge]
+    V --> D{done}
+    D -->|No| P
+    D -->|Yes| OUT[Final Response]
+
+    S --> EVAL[Offline Judge Loop<br/>opencua-style]
+    EVAL --> P
+        </pre>
+      </article>
+    </section>
+
+    <section class="slide">
+      <header>
+        <div class="kicker">Agent Loop + Guardrail</div>
+        <h2>실행 시퀀스와 실패 통제 (browser-use 용어)</h2>
+        <span class="time">45초</span>
+      </header>
+      <article class="mermaid-wrap">
+        <pre class="mermaid">
+sequenceDiagram
+    actor User
+    participant O as Agent loop
+    participant P as plan_update
+    participant A as Specialist Agent
+    participant G as Guardrail
+    participant X as Tools.act Adapter
+    participant V as Judge
+
+    User->>O: 업무 요청
+    O->>P: step 계획 갱신
+    P->>A: step assign
+    A->>G: action 제안
+
+    alt 고위험 액션
+      G-->>User: confirm 요청
+      User-->>G: 승인/거부
+    end
+
+    G->>X: Tools.act 실행
+    X-->>V: result + artifact
+    V-->>O: pass/fail
+
+    alt fail
+      O->>P: replan/retry
+    else success
+      O-->>User: 최종 결과
+    end
+        </pre>
+      </article>
+    </section>
+
+    <section class="slide">
+      <header>
+        <div class="kicker">Enterprise Adoption</div>
+        <h2>30·60·90일 도입안 + KPI</h2>
+        <span class="time">40초</span>
+      </header>
+      <div class="timeline">
+        <article class="phase">
+          <h3>0-30일</h3>
+          <p class="sub">단일 루프 MVP + 핵심 로그 수집</p>
+        </article>
+        <article class="phase">
+          <h3>31-60일</h3>
+          <p class="sub">Guardrail + 멀티에이전트 라우팅 1차</p>
+        </article>
+        <article class="phase">
+          <h3>61-90일</h3>
+          <p class="sub">Judge Loop + 운영 대시보드 + 회귀체계</p>
+        </article>
+      </div>
+      <article class="card" style="margin-top:12px;">
+        <table>
+          <thead>
+            <tr>
+              <th>KPI</th>
+              <th>목표</th>
+              <th>운영 의미</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Task Success Rate</td>
+              <td>70% → 85%+</td>
+              <td>현업 적용 가능 기준</td>
+            </tr>
+            <tr>
+              <td>Human Handoff Rate</td>
+              <td>30% → 15%-</td>
+              <td>자동화 체감 가치</td>
+            </tr>
+            <tr>
+              <td>Guardrail Violation Rate</td>
+              <td>2% 이하</td>
+              <td>보안/컴플라이언스 안정성</td>
+            </tr>
+            <tr>
+              <td>Mean Resolution Time</td>
+              <td>40% 단축</td>
+              <td>운영 효율성</td>
+            </tr>
+          </tbody>
+        </table>
+      </article>
+    </section>
+
+    <section class="slide">
+      <header>
+        <div class="kicker">Decision</div>
+        <h2>오늘의 의사결정 요청</h2>
+        <span class="time">30초</span>
+      </header>
+      <div class="grid-2">
+        <article class="card">
+          <h3>승인 요청</h3>
+          <div class="decision">
+            <div class="item"><strong>1.</strong> 하이브리드 Best Workflow를 표준 아키텍처로 채택</div>
+            <div class="item"><strong>2.</strong> 30/60/90 단계 도입 로드맵 착수</div>
+            <div class="item"><strong>3.</strong> KPI 기반 주간 운영 리뷰 체계 도입</div>
+          </div>
+        </article>
+        <article class="card">
+          <h3>즉시 실행 항목 (이번 주)</h3>
+          <div class="list">
+            <div class="list-item">A. 공통 State/Action 스키마 확정</div>
+            <div class="list-item">B. Guardrail 최소 규칙 배포</div>
+            <div class="list-item">C. Golden Task 3개로 회귀 테스트 시작</div>
+          </div>
+          <div class="chip-wrap">
+            <span class="chip">Go Decision</span>
+            <span class="chip">Risk Controlled</span>
+            <span class="chip">Measured Rollout</span>
+          </div>
+        </article>
+      </div>
+    </section>
+
+    <footer class="footer" aria-label="slide controls">
+      <div class="controls">
+        <button id="prevBtn" type="button">Prev</button>
+        <button id="nextBtn" type="button">Next</button>
+      </div>
+      <div class="progress" aria-hidden="true"><span id="progressBar"></span></div>
+      <div class="counter" id="counter">1 / 10</div>
+    </footer>
+  </main>
+
+  <div id="scoreReasonModal" class="score-modal" role="dialog" aria-hidden="true" aria-live="polite">
+    <div class="title" id="scoreReasonTitle">근거</div>
+    <div class="body" id="scoreReasonBody">배지에 마우스를 올리면 근거가 표시됩니다.</div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+  <script>
+    (function () {
+      mermaid.initialize({
+        startOnLoad: true,
+        securityLevel: 'loose',
+        theme: 'base',
+        themeVariables: {
+          primaryColor: '#eff6ff',
+          primaryTextColor: '#0f172a',
+          primaryBorderColor: '#93c5fd',
+          lineColor: '#2563eb',
+          secondaryColor: '#fff7ed',
+          tertiaryColor: '#f8fafc',
+          fontFamily: 'Noto Sans KR'
+        }
+      });
+
+      const slides = Array.from(document.querySelectorAll('.slide'));
+      const prevBtn = document.getElementById('prevBtn');
+      const nextBtn = document.getElementById('nextBtn');
+      const progressBar = document.getElementById('progressBar');
+      const counter = document.getElementById('counter');
+      const scoreboardTable = document.getElementById('scoreboardTable');
+      const scoreReasonModal = document.getElementById('scoreReasonModal');
+      const scoreReasonTitle = document.getElementById('scoreReasonTitle');
+      const scoreReasonBody = document.getElementById('scoreReasonBody');
+      let index = 0;
+      let hideModalTimer = null;
+
+      const scoreReasons = {
+        'browser-use': {
+          '실행력': '웹 자동화를 빠르게 실행할 수 있지만 액션 표면은 26개로 실행기 특화형보다 작습니다.',
+          '오케스트레이션': '단일 Agent 루프가 안정적이지만 대규모 블록 오케스트레이션 엔진까지 포함하지는 않습니다.',
+          '운영 확장성': '운영 가능 수준의 기능은 갖췄지만 엔터프라이즈 제어면에서는 skyvern/openclaw 대비 중간 수준입니다.',
+          '학습/평가': '입문과 실험에는 좋지만 opencua처럼 전용 벤치 평가 루프는 별도 구축이 필요합니다.'
+        },
+        'skyvern': {
+          '실행력': '실행 자체보다 계획/워크플로우 계층에 무게가 있어 실행력은 중간으로 평가했습니다.',
+          '오케스트레이션': 'TaskV2 + Workflow Block + completion 상태 체계가 가장 강력한 편입니다.',
+          '운영 확장성': '대규모 업무 운영을 위한 서비스 구성과 상태 관리가 두텁습니다.',
+          '학습/평가': '운영 강점이 크고 모델 중심 평가 파이프라인은 별도 연동이 필요해 중간으로 분류했습니다.'
+        },
+        'agent-browser': {
+          '실행력': '134개 액션과 데스크톱/iOS 실행 경로로 실행 계층 성능이 매우 강합니다.',
+          '오케스트레이션': '내부 plan_update보다 외부 조율기에 위임되는 구조라 오케스트레이션 점수는 낮습니다.',
+          '운영 확장성': '실행 레이어 확장은 강하지만 end-to-end 운영 플랫폼 기능은 외부 결합이 필요합니다.',
+          '학습/평가': '연구/평가 프레임보다는 실행 엔진 특화 레포라 학습/평가 점수는 낮습니다.'
+        },
+        'openmanus': {
+          '실행력': '기본 실행은 안정적이지만 실행 표면의 폭은 실행기 특화형보다 좁아 중간으로 평가했습니다.',
+          '오케스트레이션': 'PlanningFlow + agent pool 기반 역할 라우팅이 명확해 높은 점수를 부여했습니다.',
+          '운영 확장성': 'MCP/sandbox 포함 멀티모드 확장이 가능해 운영 확장성이 높습니다.',
+          '학습/평가': '실험과 확장에는 유리하지만 독립 벤치 중심 평가 체계는 보강이 필요합니다.'
+        },
+        'ui-tars': {
+          '실행력': 'GUI 자동화에는 강하지만 범용 업무 자동화 전체를 커버하는 실행력은 제한적입니다.',
+          '오케스트레이션': '단일 에이전트 + 파서 구조로 오케스트레이션 레이어는 얇습니다.',
+          '운영 확장성': '세션/정책/워크플로우 운영 기능이 적어 대규모 운영 확장성은 낮습니다.',
+          '학습/평가': '행동 포맷과 파서 실험에는 유리해 중간 수준으로 평가했습니다.'
+        },
+        'openclaw': {
+          '실행력': '채널 운영 중심 실행 구조라 순수 브라우저 실행 특화 관점에서는 중간 수준입니다.',
+          '오케스트레이션': 'Main/Worker/Specialist 분리는 있으나 skyvern급 블록 엔진과는 성격이 달라 중간입니다.',
+          '운영 확장성': '멀티채널/세션 운영이 핵심 강점이라 운영 확장성은 높습니다.',
+          '학습/평가': '모델 벤치마크 중심 레포가 아니므로 학습/평가 점수는 낮게 책정했습니다.'
+        },
+        'opencua': {
+          '실행력': '실서비스 실행기보다 연구/평가 파이프라인 중심이라 실행력 점수는 낮습니다.',
+          '오케스트레이션': '실행당 단일 에이전트 선택형 구조여서 협업 오케스트레이션은 제한적입니다.',
+          '운영 확장성': '데이터-모델-평가 확장은 가능하지만 프로덕션 운영 계층은 중간 수준입니다.',
+          '학습/평가': 'AgentNetBench 기반 오프라인 평가 루프가 강력해 학습/평가 점수는 높습니다.'
+        }
+      };
+
+      function getCellText(row, idx) {
+        const cell = row.children[idx];
+        return cell ? cell.textContent.trim() : '';
+      }
+
+      function showScoreReason(badge) {
+        if (!badge) return;
+        clearTimeout(hideModalTimer);
+        const project = badge.dataset.project || '';
+        const metric = badge.dataset.metric || '';
+        const level = badge.textContent.trim();
+        const reason = (scoreReasons[project] && scoreReasons[project][metric])
+          ? scoreReasons[project][metric]
+          : '이 항목의 점수는 프로젝트 구조(실행/오케스트레이션/운영/평가) 비중을 기준으로 책정했습니다.';
+
+        scoreReasonTitle.textContent = `${project} · ${metric} · ${level}`;
+        scoreReasonBody.textContent = reason;
+        scoreReasonModal.classList.add('show');
+        scoreReasonModal.setAttribute('aria-hidden', 'false');
+      }
+
+      function hideScoreReason(delayMs = 0) {
+        clearTimeout(hideModalTimer);
+        hideModalTimer = setTimeout(() => {
+          scoreReasonModal.classList.remove('show');
+          scoreReasonModal.setAttribute('aria-hidden', 'true');
+        }, delayMs);
+      }
+
+      function setupScoreboardModal() {
+        if (!scoreboardTable) return;
+        const headers = Array.from(scoreboardTable.querySelectorAll('thead th'))
+          .map((th) => th.textContent.trim());
+        const rows = Array.from(scoreboardTable.querySelectorAll('tbody tr'));
+
+        rows.forEach((row) => {
+          const project = getCellText(row, 0);
+          for (let col = 1; col <= 4; col += 1) {
+            const badge = row.children[col] && row.children[col].querySelector('.score-badge');
+            if (!badge) continue;
+            const metric = headers[col] || '';
+            badge.dataset.project = project;
+            badge.dataset.metric = metric;
+            badge.setAttribute('tabindex', '0');
+            badge.setAttribute('aria-label', `${project} ${metric} ${badge.textContent.trim()} 등급 근거 보기`);
+
+            badge.addEventListener('mouseenter', () => showScoreReason(badge));
+            badge.addEventListener('mouseleave', () => hideScoreReason(100));
+            badge.addEventListener('focus', () => showScoreReason(badge));
+            badge.addEventListener('blur', () => hideScoreReason(0));
+            badge.addEventListener('click', (e) => {
+              e.stopPropagation();
+              if (scoreReasonModal.classList.contains('show') &&
+                scoreReasonTitle.textContent === `${project} · ${metric} · ${badge.textContent.trim()}`) {
+                hideScoreReason(0);
+              } else {
+                showScoreReason(badge);
+              }
+            });
+          }
+        });
+
+        document.addEventListener('click', (e) => {
+          if (!(e.target instanceof Element)) return;
+          if (!e.target.closest('.score-badge')) hideScoreReason(0);
+        });
+      }
+
+      function render() {
+        slides.forEach((slide, i) => slide.classList.toggle('active', i === index));
+        const pct = ((index + 1) / slides.length) * 100;
+        progressBar.style.width = pct + '%';
+        counter.textContent = (index + 1) + ' / ' + slides.length;
+        prevBtn.disabled = index === 0;
+        nextBtn.disabled = index === slides.length - 1;
+        if (scoreboardTable && !slides[index].contains(scoreboardTable)) {
+          hideScoreReason(0);
+        }
+      }
+
+      function next() {
+        if (index < slides.length - 1) {
+          index += 1;
+          render();
+        }
+      }
+
+      function prev() {
+        if (index > 0) {
+          index -= 1;
+          render();
+        }
+      }
+
+      nextBtn.addEventListener('click', next);
+      prevBtn.addEventListener('click', prev);
+
+      window.addEventListener('keydown', (e) => {
+        if (e.key === 'ArrowRight' || e.key === 'PageDown' || e.key === ' ') {
+          e.preventDefault();
+          next();
+        }
+        if (e.key === 'ArrowLeft' || e.key === 'PageUp') {
+          e.preventDefault();
+          prev();
+        }
+        if (e.key === 'Home') {
+          index = 0;
+          render();
+        }
+        if (e.key === 'End') {
+          index = slides.length - 1;
+          render();
+        }
+        if (e.key === 'Escape') {
+          hideScoreReason(0);
+        }
+      });
+
+      setupScoreboardModal();
+      render();
+    })();
+  </script>
+</body>
+</html>

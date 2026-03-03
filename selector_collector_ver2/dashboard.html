@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="ko" data-theme="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Selector Dashboard</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="dashboard.css">
+</head>
+<body>
+    <div class="dashboard-container">
+        <header class="dashboard-header">
+            <h1>📊 Selector Dashboard</h1>
+            <div class="header-actions">
+                <button id="move-mode-btn" class="icon-btn" title="Move Mode">⇄</button>
+                <button id="refresh-btn" class="icon-btn" title="Refresh">↻</button>
+                <button class="theme-toggle" id="themeToggle" title="Toggle theme" aria-label="Toggle theme">
+                    <svg class="theme-icon-sun" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor">
+                        <path d="M10 2a.75.75 0 0 1 .75.75v1.5a.75.75 0 0 1-1.5 0v-1.5A.75.75 0 0 1 10 2Zm0 13a.75.75 0 0 1 .75.75v1.5a.75.75 0 0 1-1.5 0v-1.5A.75.75 0 0 1 10 15Zm-8-5a.75.75 0 0 1 .75-.75h1.5a.75.75 0 0 1 0 1.5h-1.5A.75.75 0 0 1 2 10Zm13 0a.75.75 0 0 1 .75-.75h1.5a.75.75 0 0 1 0 1.5h-1.5A.75.75 0 0 1 15 10Zm-2.05-4.95a.75.75 0 0 1 0 1.06l-1.06 1.06a.75.75 0 0 1-1.06-1.06l1.06-1.06a.75.75 0 0 1 1.06 0Zm-7.07 7.07a.75.75 0 0 1 0 1.06l-1.06 1.06a.75.75 0 1 1-1.06-1.06l1.06-1.06a.75.75 0 0 1 1.06 0ZM5.05 5.05a.75.75 0 0 1 0 1.06L3.99 7.17a.75.75 0 0 1-1.06-1.06l1.06-1.06a.75.75 0 0 1 1.06 0Zm7.07 7.07a.75.75 0 0 1 0 1.06l-1.06 1.06a.75.75 0 1 1-1.06-1.06l1.06-1.06a.75.75 0 0 1 1.06 0ZM10 7a3 3 0 1 0 0 6 3 3 0 0 0 0-6Z"/>
+                    </svg>
+                    <svg class="theme-icon-moon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor">
+                        <path fill-rule="evenodd" d="M7.455 2.004a.75.75 0 0 1 .26.77 7 7 0 0 0 9.958 7.967.75.75 0 0 1 1.067.853A8.5 8.5 0 1 1 6.647 1.921a.75.75 0 0 1 .808.083Z" clip-rule="evenodd"/>
+                    </svg>
+                </button>
+            </div>
+        </header>
+
+        <main id="main-view" class="view-section">
+            <div id="file-list" class="file-grid">
+                <!-- File cards will be inserted here -->
+            </div>
+            <div id="empty-state" class="hidden">
+                <p>No selector files found.</p>
+                <p>Make sure you have selected a directory and saved some selectors.</p>
+                <button id="select-dir-btn" class="primary-btn">Select Directory</button>
+            </div>
+        </main>
+
+        <section id="detail-view" class="view-section hidden">
+            <header class="detail-header">
+                <button id="back-btn" class="icon-btn">← Back</button>
+                <div class="filename-wrapper" style="flex:1; display:flex; align-items:center; gap:8px; margin-left: 16px;">
+                    <h2 id="current-filename" style="margin:0;">filename.json</h2>
+                    <button id="rename-file-btn" class="icon-btn" title="Rename">✏️</button>
+                    <div id="rename-container" class="hidden" style="display:flex; align-items:center; gap:4px;">
+                        <input type="text" id="rename-input" class="rename-input" placeholder="New name">
+                        <button id="confirm-rename-btn" class="icon-btn success" title="Save">✅</button>
+                        <button id="cancel-rename-btn" class="icon-btn danger" title="Cancel">❌</button>
+                    </div>
+                </div>
+                <div class="detail-actions">
+                    <button id="save-btn" class="primary-btn">Save</button>
+                </div>
+            </header>
+            <div class="detail-content">
+                <div id="entry-list" class="entry-list">
+                    <!-- Entries will be inserted here -->
+                </div>
+            </div>
+        </section>
+
+        <section id="move-view" class="view-section hidden">
+            <div class="move-header">
+                <button id="move-back-btn" class="icon-btn">← Back</button>
+                <h2>Move Entries</h2>
+                <button id="move-save-btn" class="primary-btn">Save Both</button>
+            </div>
+            <div class="move-container">
+                <div class="move-panel" id="left-panel">
+                    <select class="file-select" id="left-file-select">
+                        <option value="">Select File...</option>
+                    </select>
+                    <div class="drop-zone" id="left-drop-zone"></div>
+                </div>
+                <div class="move-divider">⇄</div>
+                <div class="move-panel" id="right-panel">
+                    <select class="file-select" id="right-file-select">
+                        <option value="">Select File...</option>
+                    </select>
+                    <div class="drop-zone" id="right-drop-zone"></div>
+                </div>
+            </div>
+        </section>
+    </div>
+
+    <!-- Scripts -->
+    <script src="lib/idb-helper.js"></script>
+    <script src="lib/fs-storage.js"></script>
+    <script src="dashboard.js"></script>
+</body>
+</html>

@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="ko" data-theme="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Selector Collector</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="sidepanel.css">
+</head>
+<body>
+    <!-- 헤더 -->
+    <header class="header">
+        <div class="header-title">
+            <h1>Selector Collector</h1>
+            <span class="status-dot" id="statusDot"></span>
+        </div>
+        <div class="header-actions">
+            <span class="status-text" id="statusText">대기 중</span>
+            <button class="theme-toggle" id="themeToggle" title="Toggle theme" aria-label="Toggle theme">
+                <svg class="theme-icon-sun" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor">
+                    <path d="M10 2a.75.75 0 0 1 .75.75v1.5a.75.75 0 0 1-1.5 0v-1.5A.75.75 0 0 1 10 2Zm0 13a.75.75 0 0 1 .75.75v1.5a.75.75 0 0 1-1.5 0v-1.5A.75.75 0 0 1 10 15Zm-8-5a.75.75 0 0 1 .75-.75h1.5a.75.75 0 0 1 0 1.5h-1.5A.75.75 0 0 1 2 10Zm13 0a.75.75 0 0 1 .75-.75h1.5a.75.75 0 0 1 0 1.5h-1.5A.75.75 0 0 1 15 10Zm-2.05-4.95a.75.75 0 0 1 0 1.06l-1.06 1.06a.75.75 0 0 1-1.06-1.06l1.06-1.06a.75.75 0 0 1 1.06 0Zm-7.07 7.07a.75.75 0 0 1 0 1.06l-1.06 1.06a.75.75 0 1 1-1.06-1.06l1.06-1.06a.75.75 0 0 1 1.06 0ZM5.05 5.05a.75.75 0 0 1 0 1.06L3.99 7.17a.75.75 0 0 1-1.06-1.06l1.06-1.06a.75.75 0 0 1 1.06 0Zm7.07 7.07a.75.75 0 0 1 0 1.06l-1.06 1.06a.75.75 0 1 1-1.06-1.06l1.06-1.06a.75.75 0 0 1 1.06 0ZM10 7a3 3 0 1 0 0 6 3 3 0 0 0 0-6Z"/>
+                </svg>
+                <svg class="theme-icon-moon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor">
+                    <path fill-rule="evenodd" d="M7.455 2.004a.75.75 0 0 1 .26.77 7 7 0 0 0 9.958 7.967.75.75 0 0 1 1.067.853A8.5 8.5 0 1 1 6.647 1.921a.75.75 0 0 1 .808.083Z" clip-rule="evenodd"/>
+                </svg>
+            </button>
+        </div>
+    </header>
+
+    <!-- 컨트롤 바 -->
+    <div class="controls">
+        <button id="toggleBtn" class="btn btn-primary">Start Collecting</button>
+        <button id="savBtn" class="btn btn-secondary" disabled>Save</button>
+        <button id="dirBtn" class="btn btn-secondary">Set Directory</button>
+        <button id="dashboardBtn" class="btn btn-secondary">Dashboard</button>
+    </div>
+
+    <!-- 현재 요소 카드 -->
+    <div class="element-card" id="elementCard" style="display:none;">
+        <div class="element-tag" id="elTag"></div>
+        <div class="element-detail" id="elId"></div>
+        <div class="element-detail" id="elClass"></div>
+        <div class="element-detail element-url" id="elUrl"></div>
+    </div>
+
+    <!-- 셀렉터 그리드 -->
+    <div class="selectors-grid" id="selectorsGrid">
+        <div class="empty-state">
+            <div class="empty-state-icon">&lt;/&gt;</div>
+            <div class="empty-state-text">요소를 클릭하여<br>셀렉터를 수집하세요</div>
+        </div>
+    </div>
+
+    <!-- 히스토리 패널 (접이식) -->
+    <details class="history-panel" id="historyPanel" open>
+        <summary class="history-summary">
+            <span>히스토리 (<span id="historyCount">0</span>)</span>
+            <div class="history-actions">
+                <button id="exportBtn" class="btn-icon" title="JSON 내보내기">Export</button>
+                <button id="clearHistoryBtn" class="btn-icon btn-danger" title="히스토리 지우기">Clear</button>
+            </div>
+        </summary>
+        <div class="history-list" id="historyList"></div>
+    </details>
+
+    <!-- 푸터 -->
+    <footer class="footer">
+        <span id="footerStatus">준비됨</span>
+        <span class="footer-version">v2.0.0</span>
+    </footer>
+
+    <div class="modal-overlay" id="saveModal" style="display: none;">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>셀렉터 저장</h3>
+                <button class="close-modal-btn" id="closeModalBtn">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="input-group">
+                    <label for="saveNameInput">이름 (Optional)</label>
+                    <input type="text" id="saveNameInput" class="modal-input" placeholder="ex: login-page" autocomplete="off">
+                    <span class="input-hint">영문, 숫자, 하이픈(-)만 허용됩니다.</span>
+                </div>
+                
+                <div class="summary-section">
+                    <div class="summary-title">저장 요약 정보</div>
+                    <div class="summary-item">
+                        <span class="summary-label">총 Entry 수:</span>
+                        <span class="summary-value" id="summaryTotal">0개</span>
+                    </div>
+                    <div class="summary-item" style="align-items: flex-start;">
+                        <span class="summary-label">수집 URL:</span>
+                        <div class="summary-list" id="summaryUrls"></div>
+                    </div>
+                    <div class="summary-item" style="align-items: flex-start;">
+                        <span class="summary-label">태그 분포:</span>
+                        <div class="summary-text" id="summaryTags"></div>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" id="cancelSaveBtn">취소</button>
+                <button class="btn btn-primary" id="confirmSaveBtn">저장</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="lib/idb-helper.js"></script>
+    <script src="lib/fs-storage.js"></script>
+    <script src="sidepanel.js"></script>
+</body>
+</html>

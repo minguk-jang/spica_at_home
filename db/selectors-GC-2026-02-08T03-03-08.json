@@ -1,0 +1,84 @@
+{
+  "exportedAt": "2026-02-08T06:30:15.412Z",
+  "totalEntries": 3,
+  "entries": [
+    {
+      "selectors": {
+        "tag": "button",
+        "classes": ".ContentPagingView-module__btn_prev___JaBFN",
+        "[type]": "button[type=\"button\"]",
+        "nthOfType": "button:nth-of-type(1)",
+        "fullCssPath": "div#newsstand > div:nth-of-type(4) > button:nth-of-type(1)",
+        "xpath": "//div[@id=\"newsstand\"]/div[4]/button[1]"
+      },
+      "validation": {
+        "tag": false,
+        "classes": true,
+        "[type]": false,
+        "nthOfType": false,
+        "fullCssPath": true,
+        "xpath": true
+      },
+      "elementInfo": {
+        "tagName": "button",
+        "id": "",
+        "className": "ContentPagingView-module__btn_prev___JaBFN __sc-highlight",
+        "textContent": "이전 페이지",
+        "url": "https://www.naver.com/",
+        "timestamp": "2026-02-08T03:02:58.382Z"
+      }
+    },
+    {
+      "selectors": {
+        "tag": "button",
+        "classes": ".ContentPagingView-module__btn_next___ZBhby",
+        "[type]": "button[type=\"button\"]",
+        "nthOfType": "button:nth-of-type(2)",
+        "fullCssPath": "div#newsstand > div:nth-of-type(4) > button:nth-of-type(2)",
+        "xpath": "//div[@id=\"newsstand\"]/div[4]/button[2]"
+      },
+      "validation": {
+        "tag": false,
+        "classes": true,
+        "[type]": false,
+        "nthOfType": false,
+        "fullCssPath": true,
+        "xpath": true
+      },
+      "elementInfo": {
+        "tagName": "button",
+        "id": "",
+        "className": "ContentPagingView-module__btn_next___ZBhby __sc-highlight",
+        "textContent": "다음 페이지",
+        "url": "https://www.naver.com/",
+        "timestamp": "2026-02-08T02:33:22.720Z"
+      }
+    },
+    {
+      "selectors": {
+        "tag": "button",
+        "classes": ".ContentPagingView-module__btn_next___ZBhby",
+        "[type]": "button[type=\"button\"]",
+        "nthOfType": "button:nth-of-type(2)",
+        "fullCssPath": "div#newsstand > div:nth-of-type(4) > button:nth-of-type(2)",
+        "xpath": "//div[@id=\"newsstand\"]/div[4]/button[2]"
+      },
+      "validation": {
+        "tag": false,
+        "classes": true,
+        "[type]": false,
+        "nthOfType": false,
+        "fullCssPath": true,
+        "xpath": true
+      },
+      "elementInfo": {
+        "tagName": "button",
+        "id": "",
+        "className": "ContentPagingView-module__btn_next___ZBhby __sc-highlight",
+        "textContent": "다음 페이지",
+        "url": "https://www.naver.com/",
+        "timestamp": "2026-02-08T06:28:04.953Z"
+      }
+    }
+  ]
+}
