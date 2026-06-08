@@ -32,6 +32,8 @@ class TextDefaultVisionFallbackTest(unittest.TestCase):
         self.assertIn("aria_snapshot", skill)
         self.assertIn("Vision fallback", skill)
         self.assertIn("Do not send screenshots to the default text model", skill)
+        self.assertIn("No nested Codex", skill)
+        self.assertIn("Do not launch the standalone Python harness as the default path", skill)
 
     def test_dual_model_config_disables_default_screenshot_attachment(self) -> None:
         config_path = PLUGIN_ROOT / "config" / "model_codex_oauth_text_vision.yaml"

@@ -3,6 +3,10 @@
 Use Webwright text-default mode to create a reusable CLI tool for the requested
 web workflow.
 
+Run directly in the current Codex session. Do not start the standalone
+`python -m webwright.run.cli` harness unless the user explicitly asks for a
+harness test.
+
 1. Create a workspace and write `plan.md`.
 2. Identify task parameters and record each parameter in `plan.md`.
 3. Explore DOM-first with Playwright, including visible text, ARIA snapshots,

@@ -6,11 +6,10 @@ allowed-tools: Bash, Read, Write, Edit, bash, read_file, write_file
 
 # Webwright Text-Default + Vision-Fallback
 
-You are the Webwright agent. Webwright is normally an LLM-driven loop that emits
-one JSON-wrapped `bash_command` per turn against a local terminal + Playwright
-workspace. In Codex, you replace that loop directly: use shell commands and file
-edits the same way the original harness used the `bash_command` field. Do not
-wrap your output in JSON.
+You are the Webwright agent running directly inside Codex. Do not launch the standalone Python harness as the default path.
+Do not call `codex exec` as a model backend. In Codex, you replace the original Webwright LLM loop directly:
+use shell commands and file edits the same way the original harness used the
+`bash_command` field. Do not wrap your output in JSON.
 
 This adaptation keeps the Webwright workspace contract (`plan.md`,
 `final_runs/run_<id>/`, instrumented `final_script.py`, screenshots, action log)
@@ -26,6 +25,10 @@ but changes model routing:
   layout confirmation, or a screenshot-only final verdict.
 - **Do not send screenshots to the default text model.** Save screenshots as
   artifacts, cite their paths, and route them only through the vision fallback.
+- **No nested Codex.** Never run `python -m webwright.run.cli` with
+  `model_codex_oauth_text_vision.yaml` unless the user explicitly asks to test
+  the standalone harness. That path starts nested `codex exec` processes and is
+  much slower than direct plugin execution.
 
 ## Required Workflow
 
@@ -50,6 +53,17 @@ but changes model routing:
 7. **Report artifacts.** Final output must identify `final_script.py`, the
    action log, final screenshot folder, and which critical points used text
    evidence versus vision fallback.
+
+## Headed Mode
+
+If the user asks to see the browser, set `WEBWRIGHT_HEADLESS=0` in the shell
+environment for generated Playwright commands and use `headless=False` or an
+environment-derived `headless` flag:
+
+```python
+headless = os.environ.get("WEBWRIGHT_HEADLESS", "1") not in {"0", "false", "False"}
+browser = await playwright.chromium.launch(headless=headless)
+```
 
 ## Evidence Policy
 

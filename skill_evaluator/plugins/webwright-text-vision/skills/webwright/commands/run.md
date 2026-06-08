@@ -2,6 +2,10 @@
 
 Use Webwright text-default mode for the requested one-shot web task.
 
+Run directly in the current Codex session. Do not start the standalone
+`python -m webwright.run.cli` harness unless the user explicitly asks for a
+harness test.
+
 1. Create a workspace for this run.
 2. Write `plan.md` with critical points. Prefer DOM/text/ARIA/log evidence and
    mark only genuinely visual checks as `vision_required`.
