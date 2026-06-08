@@ -1,0 +1,20 @@
+{
+  "name": "webwright-text-vision",
+  "interface": {
+    "displayName": "Webwright Text + Vision"
+  },
+  "plugins": [
+    {
+      "name": "webwright-text-vision",
+      "source": {
+        "source": "local",
+        "path": "./plugins/webwright-text-vision"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Productivity"
+    }
+  ]
+}

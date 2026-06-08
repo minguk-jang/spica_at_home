@@ -1,0 +1,24 @@
+{
+  "name": "webwright-text-vision",
+  "version": "0.1.0",
+  "description": "Webwright adapted for Codex Spark: use a text default model for DOM-first Playwright work and a vision fallback only for screenshot judgment.",
+  "author": {
+    "name": "Local adaptation",
+    "url": "https://github.com/microsoft/Webwright"
+  },
+  "homepage": "https://github.com/microsoft/Webwright",
+  "repository": "https://github.com/microsoft/Webwright",
+  "license": "MIT",
+  "keywords": ["browser", "playwright", "web-agent", "automation", "codex-spark", "vision-fallback"],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Webwright Text + Vision",
+    "shortDescription": "DOM-first Webwright with vision fallback",
+    "longDescription": "Runs Webwright-style browser automation with a text default model such as gpt-5.3-codex-spark, reserving vision-capable models for screenshot inspection and final visual verification.",
+    "developerName": "Local adaptation",
+    "category": "Productivity",
+    "capabilities": ["Read", "Write"],
+    "defaultPrompt": "Use Webwright in text default mode with vision fallback only when screenshot inspection is necessary.",
+    "websiteURL": "https://github.com/microsoft/Webwright"
+  }
+}
