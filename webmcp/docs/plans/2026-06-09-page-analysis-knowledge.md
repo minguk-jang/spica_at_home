@@ -53,6 +53,6 @@
 
 **Commands:**
 - `cd core && python3 -m unittest tests/test_page_memory.py tests/test_workflow_creation_runtime_service.py`
-- `cd core && python3 -m unittest tests/test_workflow_skills.py tests/test_synthesis_provider_port.py`
+- `cd core && python3 -m unittest tests/test_workflow_tools.py tests/test_synthesis_provider_port.py`
 
 **Expected:** All selected tests pass, including at least three deterministic examples proving storage, lookup, prompt retrieval, and update behavior.

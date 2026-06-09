@@ -52,7 +52,7 @@ def canonical_json(value: object) -> str:
 class WorkflowSkillStoreTest(unittest.TestCase):
     def test_seed_creates_skill_like_metadata_and_lazy_version_details(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
-            db_path = Path(tmp) / "workflow_skills.sqlite"
+            db_path = Path(tmp) / "workflow_tools.sqlite"
             store = WorkflowSkillStore(db_path)
             store.initialize()
             seed_naver_stock_report(store)
@@ -75,23 +75,23 @@ class WorkflowSkillStoreTest(unittest.TestCase):
 
     def test_seed_restores_distinct_stock_report_examples_for_existing_skill(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
-            db_path = Path(tmp) / "workflow_skills.sqlite"
+            db_path = Path(tmp) / "workflow_tools.sqlite"
             store = WorkflowSkillStore(db_path)
             store.initialize()
             seed_naver_stock_report(store)
 
             with sqlite3.connect(db_path) as conn:
                 skill_id = conn.execute(
-                    "select id from workflow_skills where name = ?",
+                    "select id from workflow_tools where name = ?",
                     ("naver_stock_report",),
                 ).fetchone()[0]
                 conn.execute(
-                    "delete from workflow_skill_examples where skill_id = ? and user_request != ?",
+                    "delete from workflow_tool_examples where skill_id = ? and user_request != ?",
                     (skill_id, "네이버에서 삼성전자 주가 리포트"),
                 )
                 conn.execute(
                     """
-                    insert into workflow_skill_examples
+                    insert into workflow_tool_examples
                       (skill_id, user_request, normalized_arguments_json, expected_output_summary)
                     values (?, ?, ?, ?)
                     """,
@@ -109,7 +109,7 @@ class WorkflowSkillStoreTest(unittest.TestCase):
                 rows = conn.execute(
                     """
                     select normalized_arguments_json
-                    from workflow_skill_examples
+                    from workflow_tool_examples
                     where skill_id = ?
                     """,
                     (skill_id,),
@@ -134,7 +134,7 @@ class WorkflowSkillStoreTest(unittest.TestCase):
 
     def test_executor_runs_seeded_skill_without_llm_and_records_steps(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
-            db_path = Path(tmp) / "workflow_skills.sqlite"
+            db_path = Path(tmp) / "workflow_tools.sqlite"
             output_dir = Path(tmp) / "runs"
             store = WorkflowSkillStore(db_path)
             store.initialize()
@@ -179,7 +179,7 @@ class WorkflowSkillStoreTest(unittest.TestCase):
 
     def test_executor_fails_fast_when_required_argument_is_missing(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
-            db_path = Path(tmp) / "workflow_skills.sqlite"
+            db_path = Path(tmp) / "workflow_tools.sqlite"
             store = WorkflowSkillStore(db_path)
             store.initialize()
             seed_naver_stock_report(store)
@@ -202,7 +202,7 @@ class WorkflowSkillStoreTest(unittest.TestCase):
                 raise RuntimeError("browser monitor crashed")
 
         with tempfile.TemporaryDirectory() as tmp:
-            db_path = Path(tmp) / "workflow_skills.sqlite"
+            db_path = Path(tmp) / "workflow_tools.sqlite"
             store = WorkflowSkillStore(db_path)
             store.initialize()
             seed_naver_stock_report(store)
@@ -237,7 +237,7 @@ class WorkflowSkillStoreTest(unittest.TestCase):
 
     def test_cli_seeds_and_runs_workflow_skill(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
-            db_path = Path(tmp) / "workflow_skills.sqlite"
+            db_path = Path(tmp) / "workflow_tools.sqlite"
             output_dir = Path(tmp) / "runs"
 
             completed = subprocess.run(
@@ -271,7 +271,7 @@ class WorkflowSkillStoreTest(unittest.TestCase):
 
     def test_loader_can_load_a_specific_workflow_version(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
-            db_path = Path(tmp) / "workflow_skills.sqlite"
+            db_path = Path(tmp) / "workflow_tools.sqlite"
             output_dir = Path(tmp) / "runs"
             store = WorkflowSkillStore(db_path)
             store.initialize()
@@ -305,7 +305,7 @@ class WorkflowSkillStoreTest(unittest.TestCase):
 
     def test_cli_runs_specific_workflow_version(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
-            db_path = Path(tmp) / "workflow_skills.sqlite"
+            db_path = Path(tmp) / "workflow_tools.sqlite"
             output_dir = Path(tmp) / "runs"
 
             completed = subprocess.run(
@@ -373,7 +373,7 @@ class WorkflowSkillStoreTest(unittest.TestCase):
 
     def test_cli_proposes_and_applies_workflow_update(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
-            db_path = Path(tmp) / "workflow_skills.sqlite"
+            db_path = Path(tmp) / "workflow_tools.sqlite"
             workflow_json_path = Path(tmp) / "proposal.json"
             proposed = naver_stock_workflow_json()
             proposed["body_md"] = proposed["body_md"] + "\n\nInclude valuation metrics in the report."
@@ -449,7 +449,7 @@ class WorkflowSkillStoreTest(unittest.TestCase):
 
     def test_cli_cold_init_creates_skill_and_records_timings(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
-            db_path = Path(tmp) / "workflow_skills.sqlite"
+            db_path = Path(tmp) / "workflow_tools.sqlite"
             output_dir = Path(tmp) / "runs"
 
             completed = subprocess.run(
@@ -484,14 +484,14 @@ class WorkflowSkillStoreTest(unittest.TestCase):
 
             with sqlite3.connect(db_path) as conn:
                 cold_count = conn.execute("select count(*) from cold_init_runs").fetchone()[0]
-                skill_count = conn.execute("select count(*) from workflow_skills").fetchone()[0]
+                skill_count = conn.execute("select count(*) from workflow_tools").fetchone()[0]
 
             self.assertEqual(1, cold_count)
             self.assertEqual(1, skill_count)
 
     def test_cli_intelligent_cold_init_defaults_to_gpt_55_model_with_fake_backend(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
-            db_path = Path(tmp) / "workflow_skills.sqlite"
+            db_path = Path(tmp) / "workflow_tools.sqlite"
             output_dir = Path(tmp) / "runs"
 
             completed = subprocess.run(
@@ -534,7 +534,7 @@ class WorkflowSkillStoreTest(unittest.TestCase):
 
     def test_evolver_creates_new_skill_version_and_update_event(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
-            db_path = Path(tmp) / "workflow_skills.sqlite"
+            db_path = Path(tmp) / "workflow_tools.sqlite"
             output_dir = Path(tmp) / "runs"
             store = WorkflowSkillStore(db_path)
             store.initialize()
@@ -569,15 +569,15 @@ class WorkflowSkillStoreTest(unittest.TestCase):
             self.assertEqual(new_version_id, skill_v2.version_id)
 
             with sqlite3.connect(db_path) as conn:
-                event_count = conn.execute("select count(*) from skill_update_events").fetchone()[0]
-                version_count = conn.execute("select count(*) from workflow_skill_versions").fetchone()[0]
+                event_count = conn.execute("select count(*) from workflow_tool_update_events").fetchone()[0]
+                version_count = conn.execute("select count(*) from workflow_tool_versions").fetchone()[0]
 
             self.assertEqual(1, event_count)
             self.assertEqual(2, version_count)
 
     def test_cold_init_creates_skill_from_discovery_without_seed(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
-            db_path = Path(tmp) / "workflow_skills.sqlite"
+            db_path = Path(tmp) / "workflow_tools.sqlite"
             output_dir = Path(tmp) / "runs"
             store = WorkflowSkillStore(db_path)
             store.initialize()
@@ -603,8 +603,8 @@ class WorkflowSkillStoreTest(unittest.TestCase):
             with sqlite3.connect(db_path) as conn:
                 conn.row_factory = sqlite3.Row
                 cold_run = conn.execute("select * from cold_init_runs").fetchone()
-                skill_count = conn.execute("select count(*) from workflow_skills").fetchone()[0]
-                version_count = conn.execute("select count(*) from workflow_skill_versions").fetchone()[0]
+                skill_count = conn.execute("select count(*) from workflow_tools").fetchone()[0]
+                version_count = conn.execute("select count(*) from workflow_tool_versions").fetchone()[0]
 
             self.assertEqual(1, skill_count)
             self.assertEqual(1, version_count)
@@ -675,7 +675,7 @@ class WorkflowSkillStoreTest(unittest.TestCase):
 
     def test_intelligent_cold_init_uses_llm_synthesizer_and_records_gpt_55_model(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
-            db_path = Path(tmp) / "workflow_skills.sqlite"
+            db_path = Path(tmp) / "workflow_tools.sqlite"
             output_dir = Path(tmp) / "runs"
             store = WorkflowSkillStore(db_path)
             store.initialize()
@@ -712,7 +712,7 @@ class WorkflowSkillStoreTest(unittest.TestCase):
 
     def test_cli_intelligent_cold_init_accepts_agent_json_without_nested_codex(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
-            db_path = Path(tmp) / "workflow_skills.sqlite"
+            db_path = Path(tmp) / "workflow_tools.sqlite"
             output_dir = Path(tmp) / "runs"
             workflow_path = Path(tmp) / "workflow.json"
             workflow_path.write_text(json.dumps(naver_stock_workflow_json(), ensure_ascii=False), encoding="utf-8")

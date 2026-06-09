@@ -49,18 +49,18 @@ class QueueEvalLoop:
 class WorkflowEvolutionRuntimeServiceTest(unittest.TestCase):
     def test_evolve_records_argument_example_metadata_after_success(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
-            db_path = Path(tmp) / "workflow_skills.sqlite"
+            db_path = Path(tmp) / "workflow_tools.sqlite"
             output_dir = Path(tmp) / "runs"
             store = WorkflowSkillStore(db_path)
             store.initialize()
             seed_naver_stock_report(store)
             with store.connect() as conn:
                 skill_id = int(
-                    conn.execute("select id from workflow_skills where name = ?", ("naver_stock_report",)).fetchone()[
+                    conn.execute("select id from workflow_tools where name = ?", ("naver_stock_report",)).fetchone()[
                         "id"
                     ]
                 )
-                conn.execute("delete from workflow_skill_examples where skill_id = ?", (skill_id,))
+                conn.execute("delete from workflow_tool_examples where skill_id = ?", (skill_id,))
 
             eval_loop = QueueEvalLoop(
                 [
@@ -93,7 +93,7 @@ class WorkflowEvolutionRuntimeServiceTest(unittest.TestCase):
                 example = conn.execute(
                     """
                     select user_request, normalized_arguments_json, expected_output_summary, success_count
-                    from workflow_skill_examples
+                    from workflow_tool_examples
                     where skill_id = ?
                     """,
                     (skill_id,),
@@ -111,7 +111,7 @@ class WorkflowEvolutionRuntimeServiceTest(unittest.TestCase):
 
     def test_evolve_applies_agent_json_repair_and_reruns_until_pass(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
-            db_path = Path(tmp) / "workflow_skills.sqlite"
+            db_path = Path(tmp) / "workflow_tools.sqlite"
             output_dir = Path(tmp) / "runs"
             repaired_workflow_path = Path(tmp) / "repaired_workflow.json"
             repaired_workflow = naver_stock_workflow_json()
@@ -202,7 +202,7 @@ class WorkflowEvolutionRuntimeServiceTest(unittest.TestCase):
 
     def test_evolve_stops_with_repair_request_when_agent_response_is_not_available(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
-            db_path = Path(tmp) / "workflow_skills.sqlite"
+            db_path = Path(tmp) / "workflow_tools.sqlite"
             output_dir = Path(tmp) / "runs"
             store = WorkflowSkillStore(db_path)
             store.initialize()
@@ -243,7 +243,7 @@ class WorkflowEvolutionRuntimeServiceTest(unittest.TestCase):
 
     def test_evolve_auto_synthesizer_repairs_without_manual_workflow_json_file(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
-            db_path = Path(tmp) / "workflow_skills.sqlite"
+            db_path = Path(tmp) / "workflow_tools.sqlite"
             output_dir = Path(tmp) / "runs"
             store = WorkflowSkillStore(db_path)
             store.initialize()

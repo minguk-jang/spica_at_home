@@ -83,13 +83,13 @@ class WorkflowMemorySyncTest(unittest.TestCase):
             with sqlite3.connect(db_path) as conn:
                 conn.row_factory = sqlite3.Row
                 skill_id = conn.execute(
-                    "select id from workflow_skills where name = ?",
+                    "select id from workflow_tools where name = ?",
                     ("naver_stock_report",),
                 ).fetchone()["id"]
                 example_rows = conn.execute(
                     """
                     select *
-                    from workflow_skill_examples
+                    from workflow_tool_examples
                     where skill_id = ? and normalized_arguments_json = ?
                     """,
                     (
@@ -109,9 +109,9 @@ class WorkflowMemorySyncTest(unittest.TestCase):
                     conn.execute(
                         """
                         select examples_json
-                        from workflow_skill_arguments
+                        from workflow_tool_arguments
                         where name = ? and version_id = (
-                            select latest_version_id from workflow_skills where id = ?
+                            select latest_version_id from workflow_tools where id = ?
                         )
                         """,
                         ("company_name", skill_id),

@@ -137,7 +137,7 @@ class WorkflowUpdateProposalService:
                 """
                 select p.*, s.name as workflow_name
                 from workflow_update_proposals p
-                join workflow_skills s on s.id = p.skill_id
+                join workflow_tools s on s.id = p.skill_id
                 where p.id = ?
                 """,
                 (proposal_id,),
@@ -146,7 +146,7 @@ class WorkflowUpdateProposalService:
                 raise KeyError(f"workflow update proposal not found: {proposal_id}")
             if proposal["status"] == "applied" and proposal["applied_version_id"]:
                 version_row = conn.execute(
-                    "select version from workflow_skill_versions where id = ?",
+                    "select version from workflow_tool_versions where id = ?",
                     (proposal["applied_version_id"],),
                 ).fetchone()
                 return ApplyProposalResult(
@@ -162,7 +162,7 @@ class WorkflowUpdateProposalService:
             workflow = bind_known_handlers(loads(proposal["proposed_workflow_json"], {}))
             validate_workflow_json(workflow)
             base = conn.execute(
-                "select version from workflow_skill_versions where id = ?",
+                "select version from workflow_tool_versions where id = ?",
                 (proposal["base_version_id"],),
             ).fetchone()
             if not base:
@@ -178,7 +178,7 @@ class WorkflowUpdateProposalService:
             )
             conn.execute(
                 """
-                update workflow_skills
+                update workflow_tools
                 set latest_version_id = ?, description = ?, domain = ?, task_type = ?,
                     updated_at = current_timestamp
                 where id = ?
@@ -195,7 +195,7 @@ class WorkflowUpdateProposalService:
             event_diff["proposal_id"] = proposal_id
             conn.execute(
                 """
-                insert into skill_update_events
+                insert into workflow_tool_update_events
                   (skill_id, from_version_id, to_version_id, run_id, update_type, reason, diff_json, approved_by)
                 values (?, ?, ?, ?, ?, ?, ?, ?)
                 """,
@@ -247,13 +247,13 @@ def backend_from_name(
 def workflow_json_from_skill(store: WorkflowSkillStore, skill: WorkflowSkill) -> dict[str, Any]:
     with store.connect() as conn:
         skill_row = conn.execute(
-            "select slug from workflow_skills where id = ?",
+            "select slug from workflow_tools where id = ?",
             (skill.id,),
         ).fetchone()
         resource_rows = conn.execute(
             """
             select resource_type, name, description, content_json, content_text, load_when_json
-            from workflow_skill_resources
+            from workflow_tool_resources
             where version_id = ?
             order by id
             """,
@@ -392,7 +392,7 @@ def _insert_workflow_version(
     version_id = int(
         conn.execute(
             """
-            insert into workflow_skill_versions
+            insert into workflow_tool_versions
               (skill_id, version, summary, input_schema_json, output_schema_json,
                body_md, load_policy_json, created_from_run_id, status)
             values (?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -413,7 +413,7 @@ def _insert_workflow_version(
     for index, argument in enumerate(workflow["arguments"]):
         conn.execute(
             """
-            insert into workflow_skill_arguments
+            insert into workflow_tool_arguments
               (version_id, name, description, type, required, default_value_json,
                validation_json, examples_json, is_dynamic, order_index)
             values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -434,7 +434,7 @@ def _insert_workflow_version(
     for index, step in enumerate(workflow["steps"]):
         conn.execute(
             """
-            insert into workflow_skill_steps
+            insert into workflow_tool_steps
               (version_id, order_index, name, description, step_type, handler_ref,
                action_json, argument_bindings_json, assertions_json,
                fallback_policy_json, update_policy_json)
@@ -457,7 +457,7 @@ def _insert_workflow_version(
     for resource in workflow["resources"]:
         conn.execute(
             """
-            insert into workflow_skill_resources
+            insert into workflow_tool_resources
               (version_id, resource_type, name, description, content_json, content_text, load_when_json)
             values (?, ?, ?, ?, ?, ?, ?)
             """,
@@ -505,7 +505,7 @@ def _next_version(store: WorkflowSkillStore, skill_id: int) -> int:
 
 def _next_version_from_conn(conn, skill_id: int) -> int:
     row = conn.execute(
-        "select coalesce(max(version), 0) + 1 as next_version from workflow_skill_versions where skill_id = ?",
+        "select coalesce(max(version), 0) + 1 as next_version from workflow_tool_versions where skill_id = ?",
         (skill_id,),
     ).fetchone()
     return int(row["next_version"])

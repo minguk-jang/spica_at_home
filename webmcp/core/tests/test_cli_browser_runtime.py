@@ -91,7 +91,7 @@ class CliBrowserRuntimeTests(unittest.TestCase):
                 "python",
                 "run-version",
                 "--db",
-                str(Path(tmp) / "workflow_skills.sqlite"),
+                str(Path(tmp) / "workflow_tools.sqlite"),
                 "--output-dir",
                 str(Path(tmp) / "runs"),
                 "--workflow-name",

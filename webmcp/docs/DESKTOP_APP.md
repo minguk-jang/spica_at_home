@@ -3,6 +3,7 @@
 `webmcp/apps/desktop`는 WebMCP workflow를 확인하고 관리하는 Electron 앱입니다.
 이 앱은 workflow engine이 아니라 관리 화면입니다. 실행과 수정은 Python Core가
 담당하고, DB 읽기는 Rust sidecar가 담당합니다.
+처음 실행, DB 확인, Tool list 장애 대응은 [RUNBOOK.md](RUNBOOK.md)를 먼저 봅니다.
 
 ## 구성 요소
 
@@ -20,7 +21,7 @@ flowchart TB
   end
 
   Core["../../core<br/>Python CLI"]
-  DB["../../core/outputs/*.sqlite"]
+  DB["~/.webmcp-studio/db/workflows.sqlite"]
 
   UI --> Preload
   Preload --> Main
@@ -113,7 +114,7 @@ sequenceDiagram
   CLI->>DB: draft workflow version 저장
   CLI->>CLI: Eval & Evolve 최대 10회
   alt 성공
-    CLI->>DB: workflow_skill_examples 저장
+    CLI->>DB: workflow_tool_examples 저장
     CLI->>DB: stable workflow로 publish
     CLI-->>UI: created_skill_id 반환
     UI->>UI: Tool List refresh 후 상세 화면 이동

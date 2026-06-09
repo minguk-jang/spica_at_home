@@ -21,7 +21,7 @@ def record_successful_argument_example(
         rows = conn.execute(
             """
             select id, name, examples_json
-            from workflow_skill_arguments
+            from workflow_tool_arguments
             where version_id = ?
             order by order_index
             """,
@@ -40,7 +40,7 @@ def record_successful_argument_example(
 
             merged_examples = _merge_argument_examples(loads(row["examples_json"], []), value)
             conn.execute(
-                "update workflow_skill_arguments set examples_json = ? where id = ?",
+                "update workflow_tool_arguments set examples_json = ? where id = ?",
                 (dumps(merged_examples), row["id"]),
             )
 
@@ -51,7 +51,7 @@ def record_successful_argument_example(
         existing = conn.execute(
             """
             select id
-            from workflow_skill_examples
+            from workflow_tool_examples
             where skill_id = ? and normalized_arguments_json = ?
             """,
             (skill_id, normalized_json),
@@ -61,7 +61,7 @@ def record_successful_argument_example(
 
         conn.execute(
             """
-            insert into workflow_skill_examples
+            insert into workflow_tool_examples
               (skill_id, user_request, normalized_arguments_json, expected_output_summary, success_count, last_used_at)
             values (?, ?, ?, ?, ?, current_timestamp)
             """,

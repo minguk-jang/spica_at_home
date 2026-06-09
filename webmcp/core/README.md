@@ -3,7 +3,8 @@
 이 디렉터리는 WebMCP의 Python core입니다. workflow 저장소, 실행기, cold init,
 update proposal, Naver stock handler, Webwright text/vision 플러그인 패키지가
 여기에 있습니다. 전체 프로젝트 지도는 [../README.md](../README.md)를 먼저
-확인합니다.
+확인합니다. 새로 온보딩하거나 운영 문제를 해결할 때는
+[../docs/RUNBOOK.md](../docs/RUNBOOK.md)를 우선 봅니다.
 
 ## Core 책임
 
@@ -200,12 +201,53 @@ python3 -m webworkflows.cli create-workflow \
 max 10회로 고정하고 UI에 노출하지 않습니다.
 
 검증을 통과한 argument set은 workflow metadata에도 저장됩니다. Core는 성공한
-Eval & Evolve loop 안에서 `workflow_skill_examples`에 `user_request`,
+Eval & Evolve loop 안에서 `workflow_tool_examples`에 `user_request`,
 `normalized_arguments_json`, 기대 출력 요약을 기록하고, 각 argument의
 `examples_json`도 성공 입력값으로 보강합니다. Desktop의 Argument Examples 패널은
 이 metadata를 읽어 다음 테스트 입력으로 재사용합니다. `company_name`/`ticker`처럼
 기존 stock 전용 flag가 없는 workflow argument는 `run-version`과 `evolve`에서
 `--argument name=value` 형식으로 전달합니다.
+
+## JavaScript tool 변환
+
+DB에 저장된 workflow tool은 Node.js에서 실행할 수 있는 JavaScript tool로 export할
+수 있습니다. Export 결과는 `manifest.json`, `workflow.json`, `tool.cjs` 세 파일로
+구성되며, `tool.cjs`는 `module.exports = { manifest, workflow, run }` contract를
+제공합니다.
+
+```bash
+python3 -m webworkflows.cli export-js-tool \
+  --db ~/.webmcp-studio/db/workflows.sqlite \
+  --workflow-name naver_stock_report \
+  --version 1 \
+  --output-dir outputs/js_tools
+```
+
+실행은 JSON arguments를 파일로 넘기거나 `--argument name=value`를 반복해서 넘깁니다.
+
+```bash
+python3 -m webworkflows.cli run-js-tool \
+  --tool-dir outputs/js_tools/naver-stock-report-v1 \
+  --arguments-file outputs/js_tools/naver_stock_args.json
+```
+
+`eval-js-tool`은 생성된 JS tool이 required output contract를 만족하는지 확인합니다.
+실제 브라우저 화면/VLM 검증은 기존 `run-version --eval-and-evolve` 경로를 사용하고,
+JS eval은 변환 산출물의 deterministic parity와 output key를 검증하는 용도입니다.
+
+```bash
+python3 -m webworkflows.cli eval-js-tool \
+  --tool-dir outputs/js_tools/naver-stock-report-v1 \
+  --arguments-file outputs/js_tools/naver_stock_args.json \
+  --required-output company_name \
+  --required-output ticker \
+  --required-output current_price \
+  --required-output report_text
+```
+
+현재 JS runtime은 deterministic step인 `goto`, `wait_for_text`, `run_handler`,
+`assert_output`, `render_report`를 지원하고, 내장 handler는
+`naver_stock.extract_stock_card`와 `naver_map.extract_subway_duration`를 포함합니다.
 
 ## Reviewed memory fixtures
 
@@ -225,7 +267,7 @@ npm run db:sync-memory
 
 ```bash
 npm run db:sync-memory:dry  # fixture row 쓰기 없이 insert/update/skip 요약
-npm run db:sync-examples    # workflow_skill_examples만 동기화
+npm run db:sync-examples    # workflow_tool_examples만 동기화
 npm run db:sync-naver       # tags/category/workflow/url이 naver와 맞는 record만 동기화
 ```
 
@@ -240,7 +282,7 @@ Fixture record는 세 종류를 지원합니다.
 `page_analysis`의 `original_url`은 저장 시 Core의 URL normalization을 사용합니다.
 query string과 fragment를 제거하고 host/path를 kebab-case로 변환하므로, 저장과
 조회가 같은 key를 공유합니다. `workflow_example`은 workflow가 아직 DB에 없으면
-skip으로 보고하고, workflow가 있으면 `workflow_skill_examples`와 argument별
+skip으로 보고하고, workflow가 있으면 `workflow_tool_examples`와 argument별
 `examples_json`을 함께 보강합니다.
 
 ## Webwright Text + Vision 플러그인

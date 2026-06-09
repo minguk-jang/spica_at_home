@@ -322,6 +322,7 @@ class WorkflowCreationRuntime:
                 "creation_attempt_id": attempt_id,
                 "workflow": skill.name,
                 "workflow_version": created_workflow_version,
+                "created_tool_id": skill_id,
                 "created_skill_id": skill_id,
                 "created_version_id": created_version_id,
                 "workflow_run_id": workflow_run_id,
@@ -544,25 +545,25 @@ class WorkflowCreationRuntime:
         with self.store.connect() as conn:
             conn.execute(
                 """
-                update workflow_skills
+                update workflow_tools
                 set status = 'stable', latest_version_id = ?, updated_at = current_timestamp
                 where id = ?
                 """,
                 (version_id, skill_id),
             )
             conn.execute(
-                "update workflow_skill_versions set status = 'stable' where id = ?",
+                "update workflow_tool_versions set status = 'stable' where id = ?",
                 (version_id,),
             )
 
     def _publication_state(self, *, skill_id: int, version_id: int) -> dict[str, Any]:
         with self.store.connect() as conn:
             skill = conn.execute(
-                "select status, latest_version_id from workflow_skills where id = ?",
+                "select status, latest_version_id from workflow_tools where id = ?",
                 (skill_id,),
             ).fetchone()
             version = conn.execute(
-                "select version, status from workflow_skill_versions where id = ?",
+                "select version, status from workflow_tool_versions where id = ?",
                 (version_id,),
             ).fetchone()
         if not skill or not version:
@@ -580,19 +581,19 @@ class WorkflowCreationRuntime:
         with self.store.connect() as conn:
             conn.execute(
                 """
-                update workflow_skills
+                update workflow_tools
                 set status = ?, latest_version_id = ?, updated_at = current_timestamp
                 where id = ?
                 """,
                 (state["skill_status"], state["latest_version_id"], state["skill_id"]),
             )
             conn.execute(
-                "update workflow_skill_versions set status = ? where id = ?",
+                "update workflow_tool_versions set status = ? where id = ?",
                 (state["version_status"], state["version_id"]),
             )
             conn.execute(
                 """
-                update workflow_skill_versions
+                update workflow_tool_versions
                 set status = 'draft'
                 where skill_id = ? and version > ?
                 """,

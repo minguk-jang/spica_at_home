@@ -51,9 +51,10 @@ class WorkflowSkillStore:
 
     def initialize(self) -> None:
         with self.connect() as conn:
+            _migrate_legacy_tool_table_names(conn)
             conn.executescript(
                 """
-                create table if not exists workflow_skills (
+                create table if not exists workflow_tools (
                     id integer primary key autoincrement,
                     name text not null unique,
                     slug text not null unique,
@@ -66,9 +67,9 @@ class WorkflowSkillStore:
                     updated_at text not null default current_timestamp
                 );
 
-                create table if not exists workflow_skill_versions (
+                create table if not exists workflow_tool_versions (
                     id integer primary key autoincrement,
-                    skill_id integer not null references workflow_skills(id) on delete cascade,
+                    skill_id integer not null references workflow_tools(id) on delete cascade,
                     version integer not null,
                     summary text not null,
                     input_schema_json text not null,
@@ -81,9 +82,9 @@ class WorkflowSkillStore:
                     unique(skill_id, version)
                 );
 
-                create table if not exists workflow_skill_examples (
+                create table if not exists workflow_tool_examples (
                     id integer primary key autoincrement,
-                    skill_id integer not null references workflow_skills(id) on delete cascade,
+                    skill_id integer not null references workflow_tools(id) on delete cascade,
                     user_request text not null,
                     normalized_arguments_json text not null,
                     expected_output_summary text not null,
@@ -91,9 +92,9 @@ class WorkflowSkillStore:
                     last_used_at text
                 );
 
-                create table if not exists workflow_skill_arguments (
+                create table if not exists workflow_tool_arguments (
                     id integer primary key autoincrement,
-                    version_id integer not null references workflow_skill_versions(id) on delete cascade,
+                    version_id integer not null references workflow_tool_versions(id) on delete cascade,
                     name text not null,
                     description text not null,
                     type text not null,
@@ -105,9 +106,9 @@ class WorkflowSkillStore:
                     order_index integer not null
                 );
 
-                create table if not exists workflow_skill_steps (
+                create table if not exists workflow_tool_steps (
                     id integer primary key autoincrement,
-                    version_id integer not null references workflow_skill_versions(id) on delete cascade,
+                    version_id integer not null references workflow_tool_versions(id) on delete cascade,
                     order_index integer not null,
                     name text not null,
                     description text not null,
@@ -120,9 +121,9 @@ class WorkflowSkillStore:
                     update_policy_json text not null
                 );
 
-                create table if not exists workflow_skill_resources (
+                create table if not exists workflow_tool_resources (
                     id integer primary key autoincrement,
-                    version_id integer not null references workflow_skill_versions(id) on delete cascade,
+                    version_id integer not null references workflow_tool_versions(id) on delete cascade,
                     resource_type text not null,
                     name text not null,
                     description text not null,
@@ -133,7 +134,7 @@ class WorkflowSkillStore:
 
                 create table if not exists selector_registry (
                     id integer primary key autoincrement,
-                    skill_id integer not null references workflow_skills(id) on delete cascade,
+                    skill_id integer not null references workflow_tools(id) on delete cascade,
                     logical_name text not null,
                     description text not null,
                     selector_type text not null,
@@ -159,8 +160,8 @@ class WorkflowSkillStore:
 
                 create table if not exists workflow_runs (
                     id integer primary key autoincrement,
-                    skill_id integer not null references workflow_skills(id),
-                    version_id integer not null references workflow_skill_versions(id),
+                    skill_id integer not null references workflow_tools(id),
+                    version_id integer not null references workflow_tool_versions(id),
                     user_request text not null,
                     input_json text not null,
                     status text not null,
@@ -176,7 +177,7 @@ class WorkflowSkillStore:
                 create table if not exists step_runs (
                     id integer primary key autoincrement,
                     run_id integer not null references workflow_runs(id) on delete cascade,
-                    step_id integer not null references workflow_skill_steps(id),
+                    step_id integer not null references workflow_tool_steps(id),
                     status text not null,
                     input_json text not null,
                     output_json text,
@@ -196,11 +197,11 @@ class WorkflowSkillStore:
                     metadata_json text not null
                 );
 
-                create table if not exists skill_update_events (
+                create table if not exists workflow_tool_update_events (
                     id integer primary key autoincrement,
-                    skill_id integer not null references workflow_skills(id) on delete cascade,
-                    from_version_id integer references workflow_skill_versions(id),
-                    to_version_id integer references workflow_skill_versions(id),
+                    skill_id integer not null references workflow_tools(id) on delete cascade,
+                    from_version_id integer references workflow_tool_versions(id),
+                    to_version_id integer references workflow_tool_versions(id),
                     run_id integer references workflow_runs(id),
                     update_type text not null,
                     reason text not null,
@@ -220,8 +221,8 @@ class WorkflowSkillStore:
                     synthesis_run_id integer references workflow_synthesis_runs(id),
                     materialization_duration_ms integer,
                     first_run_duration_ms integer,
-                    created_skill_id integer references workflow_skills(id),
-                    created_version_id integer references workflow_skill_versions(id),
+                    created_skill_id integer references workflow_tools(id),
+                    created_version_id integer references workflow_tool_versions(id),
                     workflow_run_id integer references workflow_runs(id),
                     error_json text,
                     started_at text not null default current_timestamp,
@@ -245,8 +246,8 @@ class WorkflowSkillStore:
 
                 create table if not exists workflow_update_proposals (
                     id integer primary key autoincrement,
-                    skill_id integer not null references workflow_skills(id) on delete cascade,
-                    base_version_id integer not null references workflow_skill_versions(id),
+                    skill_id integer not null references workflow_tools(id) on delete cascade,
+                    base_version_id integer not null references workflow_tool_versions(id),
                     proposed_version integer not null,
                     instruction text not null,
                     discovery_provider text not null,
@@ -258,7 +259,7 @@ class WorkflowSkillStore:
                     evidence_json text not null,
                     synthesis_duration_ms integer,
                     error_json text,
-                    applied_version_id integer references workflow_skill_versions(id),
+                    applied_version_id integer references workflow_tool_versions(id),
                     approved_by text,
                     created_at text not null default current_timestamp,
                     updated_at text not null default current_timestamp
@@ -273,8 +274,8 @@ class WorkflowSkillStore:
                     status text not null,
                     max_attempts integer not null,
                     output_dir text not null,
-                    created_skill_id integer references workflow_skills(id),
-                    created_version_id integer references workflow_skill_versions(id),
+                    created_skill_id integer references workflow_tools(id),
+                    created_version_id integer references workflow_tool_versions(id),
                     workflow_run_id integer references workflow_runs(id),
                     error_json text,
                     started_at text not null default current_timestamp,
@@ -315,7 +316,7 @@ class WorkflowSkillStore:
 
                 create table if not exists evolution_sessions (
                     id integer primary key autoincrement,
-                    skill_id integer references workflow_skills(id) on delete set null,
+                    skill_id integer references workflow_tools(id) on delete set null,
                     workflow_name text not null,
                     base_version integer not null,
                     user_request text not null,
@@ -324,7 +325,7 @@ class WorkflowSkillStore:
                     max_attempts integer not null,
                     output_dir text not null,
                     final_version integer,
-                    final_version_id integer references workflow_skill_versions(id),
+                    final_version_id integer references workflow_tool_versions(id),
                     final_run_id integer references workflow_runs(id),
                     error_json text,
                     started_at text not null default current_timestamp,
@@ -337,14 +338,14 @@ class WorkflowSkillStore:
                     session_id integer not null references evolution_sessions(id) on delete cascade,
                     attempt_index integer not null,
                     version integer not null,
-                    version_id integer not null references workflow_skill_versions(id),
+                    version_id integer not null references workflow_tool_versions(id),
                     workflow_run_id integer references workflow_runs(id),
                     status text not null,
                     evaluation_json text,
                     repair_request_id integer references repair_requests(id),
                     repair_response_id integer references repair_responses(id),
                     applied_proposal_id integer references workflow_update_proposals(id),
-                    applied_version_id integer references workflow_skill_versions(id),
+                    applied_version_id integer references workflow_tool_versions(id),
                     error_json text,
                     started_at text not null default current_timestamp,
                     finished_at text,
@@ -356,8 +357,8 @@ class WorkflowSkillStore:
                     id integer primary key autoincrement,
                     session_id integer not null references evolution_sessions(id) on delete cascade,
                     attempt_id integer references evolution_attempts(id) on delete set null,
-                    skill_id integer not null references workflow_skills(id) on delete cascade,
-                    base_version_id integer not null references workflow_skill_versions(id),
+                    skill_id integer not null references workflow_tools(id) on delete cascade,
+                    base_version_id integer not null references workflow_tool_versions(id),
                     workflow_run_id integer references workflow_runs(id),
                     status text not null,
                     request_json text not null,
@@ -369,7 +370,7 @@ class WorkflowSkillStore:
                     id integer primary key autoincrement,
                     repair_request_id integer not null references repair_requests(id) on delete cascade,
                     proposal_id integer references workflow_update_proposals(id),
-                    applied_version_id integer references workflow_skill_versions(id),
+                    applied_version_id integer references workflow_tool_versions(id),
                     status text not null,
                     response_json text not null,
                     response_path text not null,
@@ -426,3 +427,32 @@ def _ensure_column(conn: sqlite3.Connection, table: str, column: str, definition
     existing = {row["name"] for row in conn.execute(f"pragma table_info({table})")}
     if column not in existing:
         conn.execute(f"alter table {table} add column {column} {definition}")
+
+
+def _migrate_legacy_tool_table_names(conn: sqlite3.Connection) -> None:
+    legacy_tables = [
+        ("workflow_skills", "workflow_tools"),
+        ("workflow_skill_versions", "workflow_tool_versions"),
+        ("workflow_skill_examples", "workflow_tool_examples"),
+        ("workflow_skill_arguments", "workflow_tool_arguments"),
+        ("workflow_skill_steps", "workflow_tool_steps"),
+        ("workflow_skill_resources", "workflow_tool_resources"),
+        ("skill_update_events", "workflow_tool_update_events"),
+    ]
+    conn.execute("pragma foreign_keys = off")
+    try:
+        for legacy_name, current_name in legacy_tables:
+            if _table_exists(conn, legacy_name) and not _table_exists(conn, current_name):
+                conn.execute(f"alter table {legacy_name} rename to {current_name}")
+    finally:
+        conn.execute("pragma foreign_keys = on")
+
+
+def _table_exists(conn: sqlite3.Connection, table_name: str) -> bool:
+    return (
+        conn.execute(
+            "select 1 from sqlite_master where type = 'table' and name = ?",
+            (table_name,),
+        ).fetchone()
+        is not None
+    )

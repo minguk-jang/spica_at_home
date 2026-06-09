@@ -5,6 +5,7 @@ import json
 import os
 import sys
 from pathlib import Path
+from typing import Any
 
 from webworkflows.cold_init import (
     ColdInitRunner,
@@ -17,6 +18,7 @@ from webworkflows.cold_init import (
 from webworkflows.dynamic_browser import CodexCliDynamicBrowserActionPlanner
 from webworkflows.eval_loop import PlaywrightEvalAndEvolveLoop, WorkflowEvaluationError
 from webworkflows.cold_init_types import ArtifactTrace
+from webworkflows.js_tool import JsToolExporter, eval_js_tool, run_js_tool
 from webworkflows.page_memory import PageAnalysisStore, WorkflowKnowledgeStore, build_script_generation_knowledge
 from webworkflows.seeds import seed_naver_stock_report
 from webworkflows.services.update_runtime import WorkflowUpdateRuntime
@@ -197,6 +199,23 @@ def main() -> None:
     evolve_parser.add_argument("--headed", action="store_true")
     add_eval_loop_args(evolve_parser)
 
+    export_js_parser = subparsers.add_parser("export-js-tool")
+    add_db_arg(export_js_parser)
+    export_js_parser.add_argument("--workflow-name", required=True)
+    export_js_parser.add_argument("--version", type=int, required=True)
+    export_js_parser.add_argument("--output-dir", required=True)
+
+    run_js_parser = subparsers.add_parser("run-js-tool")
+    run_js_parser.add_argument("--tool-dir", required=True)
+    run_js_parser.add_argument("--arguments-file")
+    run_js_parser.add_argument("--argument", action="append", default=[])
+
+    eval_js_parser = subparsers.add_parser("eval-js-tool")
+    eval_js_parser.add_argument("--tool-dir", required=True)
+    eval_js_parser.add_argument("--arguments-file")
+    eval_js_parser.add_argument("--argument", action="append", default=[])
+    eval_js_parser.add_argument("--required-output", action="append", default=[])
+
     args = parser.parse_args()
     maybe_reexec_with_browser_runtime(args)
     try:
@@ -216,6 +235,12 @@ def main() -> None:
             create_workflow(args)
         elif args.command == "evolve":
             evolve(args)
+        elif args.command == "export-js-tool":
+            export_js_tool(args)
+        elif args.command == "run-js-tool":
+            run_js_tool_command(args)
+        elif args.command == "eval-js-tool":
+            eval_js_tool_command(args)
     except WorkflowEvaluationError as exc:
         print(
             json.dumps(
@@ -758,6 +783,55 @@ def evolve(args: argparse.Namespace) -> None:
         synthesizer_model=args.synthesizer_model,
     )
     print(json.dumps(payload, ensure_ascii=False, sort_keys=True))
+
+
+def export_js_tool(args: argparse.Namespace) -> None:
+    store = WorkflowSkillStore(resolve_db_arg(args))
+    store.initialize()
+    exported = JsToolExporter(store).export(
+        workflow_name=args.workflow_name,
+        version=args.version,
+        output_dir=args.output_dir,
+    )
+    payload = {
+        "status": "succeeded",
+        "tool_dir": str(exported.tool_dir),
+        "manifest": exported.manifest,
+        "files": {
+            "manifest": str(exported.tool_dir / "manifest.json"),
+            "workflow": str(exported.tool_dir / "workflow.json"),
+            "entrypoint": str(exported.tool_dir / "tool.cjs"),
+        },
+    }
+    print(json.dumps(payload, ensure_ascii=False, sort_keys=True))
+
+
+def run_js_tool_command(args: argparse.Namespace) -> None:
+    payload = run_js_tool(args.tool_dir, _json_tool_arguments(args))
+    print(json.dumps(payload, ensure_ascii=False, sort_keys=True))
+
+
+def eval_js_tool_command(args: argparse.Namespace) -> None:
+    payload = eval_js_tool(
+        args.tool_dir,
+        _json_tool_arguments(args),
+        required_output=list(args.required_output or []),
+    )
+    print(json.dumps(payload, ensure_ascii=False, sort_keys=True))
+
+
+def _json_tool_arguments(args: argparse.Namespace) -> dict[str, Any]:
+    arguments: dict[str, Any] = {}
+    if getattr(args, "arguments_file", None):
+        arguments.update(json.loads(Path(args.arguments_file).read_text(encoding="utf-8")))
+    for item in getattr(args, "argument", []):
+        if "=" not in item:
+            raise SystemExit(f"--argument must be name=value, got: {item}")
+        key, value = item.split("=", 1)
+        if not key.strip():
+            raise SystemExit(f"--argument key is empty: {item}")
+        arguments[key.strip()] = value
+    return arguments
 
 
 if __name__ == "__main__":

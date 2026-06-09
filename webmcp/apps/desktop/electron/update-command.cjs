@@ -157,6 +157,51 @@ function buildPythonCreateWorkflowArgs(payload, defaultOutputDir) {
   return args;
 }
 
+function buildPythonExportJsToolArgs(payload, defaultOutputDir) {
+  return [
+    "-m",
+    "webworkflows.cli",
+    "export-js-tool",
+    "--db",
+    payload.dbPath,
+    "--workflow-name",
+    payload.workflowName,
+    "--version",
+    String(payload.version),
+    "--output-dir",
+    payload.outputDir || defaultOutputDir || "outputs/js_tools"
+  ];
+}
+
+function buildPythonRunJsToolArgs(payload) {
+  const args = [
+    "-m",
+    "webworkflows.cli",
+    "run-js-tool",
+    "--tool-dir",
+    payload.toolDir
+  ];
+  appendArgumentPairs(args, payload.arguments);
+  return args;
+}
+
+function buildPythonEvalJsToolArgs(payload) {
+  const args = [
+    "-m",
+    "webworkflows.cli",
+    "eval-js-tool",
+    "--tool-dir",
+    payload.toolDir
+  ];
+  appendArgumentPairs(args, payload.arguments);
+  for (const key of payload.requiredOutput || []) {
+    if (key) {
+      args.push("--required-output", key);
+    }
+  }
+  return args;
+}
+
 function appendEvalAndEvolveArgs(args, payload) {
   if (!payload.evalAndEvolve) {
     return;
@@ -172,7 +217,12 @@ function appendEvalAndEvolveArgs(args, payload) {
 
 function appendGenericArguments(args, payload) {
   const extraArguments = payload.extraArguments && typeof payload.extraArguments === "object" ? payload.extraArguments : {};
-  for (const [key, value] of Object.entries(extraArguments)) {
+  appendArgumentPairs(args, extraArguments);
+}
+
+function appendArgumentPairs(args, values) {
+  const source = values && typeof values === "object" ? values : {};
+  for (const [key, value] of Object.entries(source)) {
     if (!key || value === undefined || value === null || value === "") {
       continue;
     }
@@ -195,6 +245,9 @@ module.exports = {
   CREATE_WORKFLOW_MAX_ATTEMPTS,
   buildPythonCreateWorkflowArgs,
   buildPythonEvolveArgs,
+  buildPythonEvalJsToolArgs,
+  buildPythonExportJsToolArgs,
   buildPythonProposeArgs,
-  buildPythonRunArgs
+  buildPythonRunArgs,
+  buildPythonRunJsToolArgs
 };

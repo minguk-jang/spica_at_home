@@ -6,6 +6,9 @@ const updateCommand = require("../electron/update-command.cjs");
 const {
   buildPythonCreateWorkflowArgs,
   buildPythonEvolveArgs,
+  buildPythonEvalJsToolArgs,
+  buildPythonExportJsToolArgs,
+  buildPythonRunJsToolArgs,
   buildPythonProposeArgs,
   buildPythonRunArgs
 } = updateCommand;
@@ -205,4 +208,59 @@ test("create workflow args pass start URL task final state and Codex VLM default
   assert.equal(args.includes("--headed"), true);
   assert.equal(args.includes("--eval-and-evolve"), true);
   assert.equal(args[args.indexOf("--vlm-evaluator") + 1], "codex");
+});
+
+test("export JS tool args write selected workflow version to a js_tools output folder", () => {
+  const args = buildPythonExportJsToolArgs(
+    {
+      dbPath: "/tmp/workflows.sqlite",
+      workflowName: "naver_stock_report",
+      version: 4,
+      outputDir: "/tmp/desktop-runs/js_tools"
+    },
+    "/tmp/default-runs/js_tools"
+  );
+
+  assert.equal(args[0], "-m");
+  assert.equal(args[2], "export-js-tool");
+  assert.equal(args[args.indexOf("--db") + 1], "/tmp/workflows.sqlite");
+  assert.equal(args[args.indexOf("--workflow-name") + 1], "naver_stock_report");
+  assert.equal(args[args.indexOf("--version") + 1], "4");
+  assert.equal(args[args.indexOf("--output-dir") + 1], "/tmp/desktop-runs/js_tools");
+});
+
+test("run JS tool args pass JSON arguments as CLI argument pairs", () => {
+  const args = buildPythonRunJsToolArgs({
+    toolDir: "/tmp/js-tools/naver-stock-report-v4",
+    arguments: {
+      company_name: "삼성전자",
+      ticker: "005930",
+      news_limit: 3
+    }
+  });
+
+  assert.equal(args[0], "-m");
+  assert.equal(args[2], "run-js-tool");
+  assert.equal(args[args.indexOf("--tool-dir") + 1], "/tmp/js-tools/naver-stock-report-v4");
+  assert.equal(args.includes("company_name=삼성전자"), true);
+  assert.equal(args.includes("ticker=005930"), true);
+  assert.equal(args.includes("news_limit=3"), true);
+});
+
+test("eval JS tool args include required output contract keys", () => {
+  const args = buildPythonEvalJsToolArgs({
+    toolDir: "/tmp/js-tools/naver-stock-report-v4",
+    arguments: {
+      company_name: "삼성전자",
+      ticker: "005930"
+    },
+    requiredOutput: ["company_name", "ticker", "report_text"]
+  });
+
+  assert.equal(args[0], "-m");
+  assert.equal(args[2], "eval-js-tool");
+  assert.equal(args[args.indexOf("--tool-dir") + 1], "/tmp/js-tools/naver-stock-report-v4");
+  assert.equal(args.includes("company_name=삼성전자"), true);
+  assert.equal(args.filter((item) => item === "--required-output").length, 3);
+  assert.equal(args.includes("report_text"), true);
 });

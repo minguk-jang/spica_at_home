@@ -13,7 +13,7 @@ export function getStepScriptDescriptor(
       implementation: handler ? `${handler.module}.${handler.function}` : step.handlerRef ?? "Unregistered handler",
       storedAs: handler
         ? "handler_registry.module + handler_registry.function"
-        : "workflow_skill_steps.handler_ref"
+        : "workflow_tool_steps.handler_ref"
     };
   }
 
@@ -22,7 +22,7 @@ export function getStepScriptDescriptor(
       kind: "Template renderer",
       language: "Python executor + Markdown template",
       implementation: "WorkflowExecutor._execute_step(render_report)",
-      storedAs: "workflow_skill_resources.content_text",
+      storedAs: "workflow_tool_resources.content_text",
       resourceName: resourceNameFromAction(step.action)
     };
   }
@@ -31,7 +31,7 @@ export function getStepScriptDescriptor(
     kind: "Built-in executor action",
     language: "Python executor + JSON action",
     implementation: `WorkflowExecutor._execute_step(${step.stepType})`,
-    storedAs: "workflow_skill_steps.action_json"
+    storedAs: "workflow_tool_steps.action_json"
   };
 }
 

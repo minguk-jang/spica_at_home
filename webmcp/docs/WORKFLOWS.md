@@ -3,25 +3,27 @@
 WebMCP workflow는 Codex `SKILL.md`가 아닙니다. SQLite에 저장되는 versioned
 browser-task recipe입니다. 이름, 설명, argument schema, step, resource,
 handler reference, run history, update event를 저장하고 필요할 때 로드합니다.
+처음 실행하거나 Tool list/DB 문제를 해결할 때는 [RUNBOOK.md](RUNBOOK.md)를 먼저
+보고, 이 문서는 데이터 모델과 실행 구조를 자세히 확인할 때 사용합니다.
 
 ## 데이터 모델 개요
 
 ```mermaid
 erDiagram
-  workflow_skills ||--o{ workflow_skill_versions : has
-  workflow_skill_versions ||--o{ workflow_steps : contains
-  workflow_skill_versions ||--o{ workflow_skill_resources : renders
-  workflow_skill_versions ||--o{ workflow_runs : executes
-  workflow_runs ||--o{ workflow_step_runs : records
-  workflow_skills ||--o{ workflow_skill_examples : suggests
+  workflow_tools ||--o{ workflow_tool_versions : has
+  workflow_tool_versions ||--o{ workflow_tool_steps : contains
+  workflow_tool_versions ||--o{ workflow_tool_resources : renders
+  workflow_tool_versions ||--o{ workflow_runs : executes
+  workflow_runs ||--o{ step_runs : records
+  workflow_tools ||--o{ workflow_tool_examples : suggests
   workflow_creation_sessions ||--o{ workflow_creation_attempts : creates
   workflow_creation_sessions ||--o{ workflow_creation_artifacts : stores
   page_analyses ||--o{ workflow_creation_attempts : informs
   workflow_knowledge_entries ||--o{ workflow_creation_attempts : guides
-  workflow_skills ||--o{ handler_registry : references
-  workflow_skill_versions ||--o{ workflow_update_proposals : proposes
-  workflow_update_proposals ||--o{ skill_update_events : applies
-  workflow_skills ||--o{ evolution_sessions : evolves
+  workflow_tools ||--o{ handler_registry : references
+  workflow_tool_versions ||--o{ workflow_update_proposals : proposes
+  workflow_update_proposals ||--o{ workflow_tool_update_events : applies
+  workflow_tools ||--o{ evolution_sessions : evolves
   evolution_sessions ||--o{ evolution_attempts : retries
   evolution_attempts ||--o{ repair_requests : asks
   repair_requests ||--o{ repair_responses : applies
@@ -32,7 +34,7 @@ erDiagram
 ```mermaid
 flowchart TD
   Request["사용자 요청 + arguments"]
-  Loader["WorkflowSkillLoader"]
+  Loader["workflow tool loader"]
   Version["선택된 workflow version"]
   Step{"step type"}
   Builtin["built-in executor action<br/>goto, wait_for_text, assert_output"]
@@ -117,9 +119,9 @@ flowchart LR
 생성 세션은 `workflow_creation_sessions`, 개별 시도는
 `workflow_creation_attempts`, screenshot 등 증거는 `workflow_creation_artifacts`에
 저장됩니다. 검증을 통과하기 전 workflow는 draft 상태이고, 통과한 뒤에만
-`workflow_skills.status = stable`로 publish되어 Tool List에 나타납니다.
-성공한 loop는 같은 시점에 실제 실행 argument를 `workflow_skill_examples`와
-`workflow_skill_arguments.examples_json`에 저장합니다. 이 값은 Desktop의 Argument
+`workflow_tools.status = stable`로 publish되어 Tool List에 나타납니다.
+성공한 loop는 같은 시점에 실제 실행 argument를 `workflow_tool_examples`와
+`workflow_tool_arguments.examples_json`에 저장합니다. 이 값은 Desktop의 Argument
 Examples 패널과 후속 QA smoke 입력으로 재사용됩니다.
 
 생성 trace를 수집하면 Core는 같은 SQLite DB의 `page_analyses`를 URL key 기준으로
@@ -144,10 +146,10 @@ npm run db:sync-memory
 ```
 
 동기화 스크립트는 `workflow_example`, `page_analysis`, `knowledge` record를 읽습니다.
-`workflow_example`은 `workflow_name`으로 skill을 찾고
+`workflow_example`은 `workflow_name`으로 tool을 찾고
 `normalized_arguments_json`의 canonical JSON 값으로 중복을 판단합니다. 같은 argument
 set이 있으면 request와 기대 요약을 update하고, 없으면 insert합니다. 동시에 해당
-workflow 최신 version의 `workflow_skill_arguments.examples_json`에도 실제 입력값을
+workflow 최신 version의 `workflow_tool_arguments.examples_json`에도 실제 입력값을
 추가합니다.
 
 `page_analysis`는 `normalize_url_key()`와 동일한 로직으로 query string과 fragment를
@@ -159,6 +161,45 @@ entry가 늘지 않습니다.
 npm run db:sync-memory:dry  # fixture row 쓰기 없는 요약
 npm run db:sync-examples    # workflow examples만
 npm run db:sync-naver       # naver tag/category/workflow/url record만
+```
+
+## JavaScript tool export
+
+SQLite에 저장된 workflow tool은 JavaScript module로 변환할 수 있습니다. 변환 결과는
+다음 파일을 생성합니다.
+
+- `manifest.json`: tool 이름, version, input/output schema, runtime contract.
+- `workflow.json`: DB workflow version을 재구성한 portable JSON.
+- `tool.cjs`: Node.js CommonJS entrypoint. `module.exports = { manifest, workflow, run }`.
+
+```bash
+python3 -m webworkflows.cli export-js-tool \
+  --db ~/.webmcp-studio/db/workflows.sqlite \
+  --workflow-name naver_stock_report \
+  --version 1 \
+  --output-dir outputs/js_tools
+```
+
+생성된 JS tool은 JSON arguments로 실행합니다.
+
+```bash
+python3 -m webworkflows.cli run-js-tool \
+  --tool-dir outputs/js_tools/naver-stock-report-v1 \
+  --arguments-file outputs/js_tools/naver_stock_args.json
+```
+
+Eval 호환성은 두 층으로 나뉩니다. 실제 브라우저 화면 검증과 repair loop는 기존
+`run-version --eval-and-evolve`가 담당합니다. `eval-js-tool`은 export된 JS tool이
+같은 deterministic workflow contract와 required output key를 만족하는지 확인합니다.
+
+```bash
+python3 -m webworkflows.cli eval-js-tool \
+  --tool-dir outputs/js_tools/naver-stock-report-v1 \
+  --arguments-file outputs/js_tools/naver_stock_args.json \
+  --required-output company_name \
+  --required-output ticker \
+  --required-output current_price \
+  --required-output report_text
 ```
 
 ```bash
@@ -227,7 +268,7 @@ flowchart LR
 모두 같은 executor hook을 사용합니다.
 
 loop가 통과하면 Core는 실행에 사용한 argument set을 정규화해
-`workflow_skill_examples`에 저장합니다. `page_text`, `final_state` 같은 내부 전달값은
+`workflow_tool_examples`에 저장합니다. `page_text`, `final_state` 같은 내부 전달값은
 제외하고, workflow schema에 있는 사용자 입력 argument만 남깁니다. 같은 값이 이미
 있으면 중복 저장하지 않고, argument별 `examples_json`은 최근 성공값을 앞에 둔 최대
 3개 예시로 유지합니다. Desktop에서 이 예시를 적용하면 stock 전용

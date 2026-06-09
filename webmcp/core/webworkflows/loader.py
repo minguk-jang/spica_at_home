@@ -63,9 +63,9 @@ class WorkflowSkillLoader:
                     s.id, s.name, s.description, s.domain, s.task_type, s.status,
                     v.input_schema_json,
                     coalesce(group_concat(e.user_request, ' '), '') as examples
-                from workflow_skills s
-                join workflow_skill_versions v on v.id = s.latest_version_id
-                left join workflow_skill_examples e on e.skill_id = s.id
+                from workflow_tools s
+                join workflow_tool_versions v on v.id = s.latest_version_id
+                left join workflow_tool_examples e on e.skill_id = s.id
                 where s.status = 'stable'
                 group by s.id
                 """
@@ -111,7 +111,7 @@ class WorkflowSkillLoader:
 
     def load_skill_by_name(self, name: str) -> WorkflowSkill:
         with self.store.connect() as conn:
-            row = conn.execute("select id from workflow_skills where name = ?", (name,)).fetchone()
+            row = conn.execute("select id from workflow_tools where name = ?", (name,)).fetchone()
         if not row:
             raise KeyError(f"WebMCP workflow not found: {name}")
         return self.load_skill(int(row["id"]))
@@ -121,8 +121,8 @@ class WorkflowSkillLoader:
             row = conn.execute(
                 """
                 select id
-                from workflow_skill_versions
-                where skill_id = (select id from workflow_skills where name = ?)
+                from workflow_tool_versions
+                where skill_id = (select id from workflow_tools where name = ?)
                   and version = ?
                 """,
                 (name, version),
@@ -139,8 +139,8 @@ class WorkflowSkillLoader:
                     s.id, s.name, s.description, s.domain, s.task_type,
                     v.id as version_id, v.version, v.body_md,
                     v.input_schema_json, v.output_schema_json
-                from workflow_skills s
-                join workflow_skill_versions v on v.id = s.latest_version_id
+                from workflow_tools s
+                join workflow_tool_versions v on v.id = s.latest_version_id
                 where s.id = ?
                 """,
                 (skill_id,),
@@ -157,8 +157,8 @@ class WorkflowSkillLoader:
                     s.id, s.name, s.description, s.domain, s.task_type,
                     v.id as version_id, v.version, v.body_md,
                     v.input_schema_json, v.output_schema_json
-                from workflow_skills s
-                join workflow_skill_versions v on v.skill_id = s.id
+                from workflow_tools s
+                join workflow_tool_versions v on v.skill_id = s.id
                 where v.id = ?
                 """,
                 (version_id,),
@@ -171,7 +171,7 @@ class WorkflowSkillLoader:
         with self.store.connect() as conn:
             argument_rows = conn.execute(
                 """
-                select * from workflow_skill_arguments
+                select * from workflow_tool_arguments
                 where version_id = ?
                 order by order_index
                 """,
@@ -179,7 +179,7 @@ class WorkflowSkillLoader:
             ).fetchall()
             step_rows = conn.execute(
                 """
-                select * from workflow_skill_steps
+                select * from workflow_tool_steps
                 where version_id = ?
                 order by order_index
                 """,
@@ -187,7 +187,7 @@ class WorkflowSkillLoader:
             ).fetchall()
             resource_rows = conn.execute(
                 """
-                select name, content_text from workflow_skill_resources
+                select name, content_text from workflow_tool_resources
                 where version_id = ?
                 """,
                 (skill_row["version_id"],),

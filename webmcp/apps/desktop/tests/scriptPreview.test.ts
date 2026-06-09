@@ -56,7 +56,7 @@ test("describes built-in executor steps as JSON actions, not JavaScript", () => 
   assert.equal(descriptor.kind, "Built-in executor action");
   assert.equal(descriptor.language, "Python executor + JSON action");
   assert.equal(descriptor.implementation, "WorkflowExecutor._execute_step(goto)");
-  assert.equal(descriptor.storedAs, "workflow_skill_steps.action_json");
+  assert.equal(descriptor.storedAs, "workflow_tool_steps.action_json");
 });
 
 test("describes run_handler steps as Python handlers from the registry", () => {

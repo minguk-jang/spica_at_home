@@ -243,7 +243,7 @@ pub fn list_workflows(db_path: &Path) -> SidecarResult<Vec<WorkflowCard>> {
         return Ok(Vec::new());
     }
     let conn = connect(db_path)?;
-    if !table_exists(&conn, "workflow_skills")? {
+    if !table_exists(&conn, "workflow_tools")? {
         return Ok(Vec::new());
     }
     let mut stmt = conn
@@ -258,16 +258,16 @@ pub fn list_workflows(db_path: &Path) -> SidecarResult<Vec<WorkflowCard>> {
                 s.task_type,
                 s.status,
                 coalesce(v.version, 0) as latest_version,
-                (select count(*) from workflow_skill_versions vv where vv.skill_id = s.id) as version_count,
-                (select count(*) from workflow_skill_steps st where st.version_id = s.latest_version_id) as step_count,
+                (select count(*) from workflow_tool_versions vv where vv.skill_id = s.id) as version_count,
+                (select count(*) from workflow_tool_steps st where st.version_id = s.latest_version_id) as step_count,
                 (select count(*) from workflow_runs r where r.skill_id = s.id) as run_count,
-                (select count(*) from skill_update_events e where e.skill_id = s.id) as update_count,
+                (select count(*) from workflow_tool_update_events e where e.skill_id = s.id) as update_count,
                 (select r.status from workflow_runs r where r.skill_id = s.id order by r.id desc limit 1) as last_run_status,
                 (select r.duration_ms from workflow_runs r where r.skill_id = s.id order by r.id desc limit 1) as last_run_duration_ms,
                 (select coalesce(r.finished_at, r.started_at) from workflow_runs r where r.skill_id = s.id order by r.id desc limit 1) as last_run_at,
                 s.updated_at
-            from workflow_skills s
-            left join workflow_skill_versions v on v.id = s.latest_version_id
+            from workflow_tools s
+            left join workflow_tool_versions v on v.id = s.latest_version_id
             where s.status = 'stable'
             order by s.updated_at desc, s.id desc
             "#,
@@ -305,7 +305,7 @@ pub fn workflow_detail(db_path: &Path, workflow_id: i64) -> SidecarResult<Workfl
     let workflow = workflow_card(&conn, workflow_id)?;
     let latest_version_id: i64 = conn
         .query_row(
-            "select latest_version_id from workflow_skills where id = ?",
+            "select latest_version_id from workflow_tools where id = ?",
             params![workflow_id],
             |row| row.get(0),
         )
@@ -374,7 +374,38 @@ fn connect(db_path: &Path) -> SidecarResult<Connection> {
     if !db_path.exists() {
         return Err(format!("DB path does not exist: {}", db_path.display()));
     }
-    Connection::open(db_path).map_err(error_string)
+    let conn = Connection::open(db_path).map_err(error_string)?;
+    migrate_legacy_tool_table_names(&conn)?;
+    Ok(conn)
+}
+
+fn migrate_legacy_tool_table_names(conn: &Connection) -> SidecarResult<()> {
+    let legacy_tables = [
+        ("workflow_skills", "workflow_tools"),
+        ("workflow_skill_versions", "workflow_tool_versions"),
+        ("workflow_skill_examples", "workflow_tool_examples"),
+        ("workflow_skill_arguments", "workflow_tool_arguments"),
+        ("workflow_skill_steps", "workflow_tool_steps"),
+        ("workflow_skill_resources", "workflow_tool_resources"),
+        ("skill_update_events", "workflow_tool_update_events"),
+    ];
+    conn.execute_batch("pragma foreign_keys = off")
+        .map_err(error_string)?;
+    let result = (|| {
+        for (legacy_name, current_name) in legacy_tables {
+            if table_exists(conn, legacy_name)? && !table_exists(conn, current_name)? {
+                conn.execute(
+                    &format!("alter table {legacy_name} rename to {current_name}"),
+                    [],
+                )
+                .map_err(error_string)?;
+            }
+        }
+        Ok(())
+    })();
+    conn.execute_batch("pragma foreign_keys = on")
+        .map_err(error_string)?;
+    result
 }
 
 fn workflow_card(conn: &Connection, workflow_id: i64) -> SidecarResult<WorkflowCard> {
@@ -389,16 +420,16 @@ fn workflow_card(conn: &Connection, workflow_id: i64) -> SidecarResult<WorkflowC
             s.task_type,
             s.status,
             coalesce(v.version, 0) as latest_version,
-            (select count(*) from workflow_skill_versions vv where vv.skill_id = s.id) as version_count,
-            (select count(*) from workflow_skill_steps st where st.version_id = s.latest_version_id) as step_count,
+            (select count(*) from workflow_tool_versions vv where vv.skill_id = s.id) as version_count,
+            (select count(*) from workflow_tool_steps st where st.version_id = s.latest_version_id) as step_count,
             (select count(*) from workflow_runs r where r.skill_id = s.id) as run_count,
-            (select count(*) from skill_update_events e where e.skill_id = s.id) as update_count,
+            (select count(*) from workflow_tool_update_events e where e.skill_id = s.id) as update_count,
             (select r.status from workflow_runs r where r.skill_id = s.id order by r.id desc limit 1) as last_run_status,
             (select r.duration_ms from workflow_runs r where r.skill_id = s.id order by r.id desc limit 1) as last_run_duration_ms,
             (select coalesce(r.finished_at, r.started_at) from workflow_runs r where r.skill_id = s.id order by r.id desc limit 1) as last_run_at,
             s.updated_at
-        from workflow_skills s
-        left join workflow_skill_versions v on v.id = s.latest_version_id
+        from workflow_tools s
+        left join workflow_tool_versions v on v.id = s.latest_version_id
         where s.id = ?
         "#,
         params![workflow_id],
@@ -434,7 +465,7 @@ fn versions(conn: &Connection, workflow_id: i64) -> SidecarResult<Vec<WorkflowVe
             r#"
             select id, version, summary, input_schema_json, output_schema_json, body_md,
                    status, created_from_run_id, created_at
-            from workflow_skill_versions
+            from workflow_tool_versions
             where skill_id = ?
             order by version desc
             "#,
@@ -464,7 +495,7 @@ fn arguments(conn: &Connection, version_id: i64) -> SidecarResult<Vec<WorkflowAr
             r#"
             select id, version_id, name, description, type, required, default_value_json,
                    validation_json, examples_json, is_dynamic, order_index
-            from workflow_skill_arguments
+            from workflow_tool_arguments
             where version_id = ?
             order by order_index
             "#,
@@ -497,7 +528,7 @@ fn steps(conn: &Connection, version_id: i64) -> SidecarResult<Vec<WorkflowStep>>
             select id, version_id, order_index, name, description, step_type, handler_ref,
                    action_json, argument_bindings_json, assertions_json,
                    fallback_policy_json, update_policy_json
-            from workflow_skill_steps
+            from workflow_tool_steps
             where version_id = ?
             order by order_index
             "#,
@@ -529,7 +560,7 @@ fn resources(conn: &Connection, version_id: i64) -> SidecarResult<Vec<WorkflowRe
         .prepare(
             r#"
             select id, version_id, resource_type, name, description, content_json, content_text, load_when_json
-            from workflow_skill_resources
+            from workflow_tool_resources
             where version_id = ?
             order by id
             "#,
@@ -564,7 +595,7 @@ fn handlers(conn: &Connection, version_id: i64) -> SidecarResult<Vec<WorkflowHan
             select distinct h.id, h.name, h.description, h.module, h.function,
                    h.input_schema_json, h.output_schema_json, h.allowed_domains_json
             from handler_registry h
-            join workflow_skill_steps s on s.handler_ref = h.name
+            join workflow_tool_steps s on s.handler_ref = h.name
             where s.version_id = ?
             order by h.name
             "#,
@@ -660,7 +691,7 @@ fn update_events(conn: &Connection, workflow_id: i64) -> SidecarResult<Vec<Updat
             r#"
             select id, from_version_id, to_version_id, run_id, update_type, reason,
                    diff_json, approved_by, created_at
-            from skill_update_events
+            from workflow_tool_update_events
             where skill_id = ?
             order by id desc
             "#,
@@ -685,7 +716,7 @@ fn update_events(conn: &Connection, workflow_id: i64) -> SidecarResult<Vec<Updat
 }
 
 fn examples(conn: &Connection, workflow_id: i64) -> SidecarResult<Vec<WorkflowExample>> {
-    if !table_exists(conn, "workflow_skill_examples")? {
+    if !table_exists(conn, "workflow_tool_examples")? {
         return Ok(Vec::new());
     }
     let mut stmt = conn
@@ -693,7 +724,7 @@ fn examples(conn: &Connection, workflow_id: i64) -> SidecarResult<Vec<WorkflowEx
             r#"
             select id, skill_id, user_request, normalized_arguments_json,
                    expected_output_summary, success_count, last_used_at
-            from workflow_skill_examples
+            from workflow_tool_examples
             where skill_id = ?
             order by success_count desc, id asc
             limit 12
@@ -863,7 +894,7 @@ mod tests {
     fn create_fixture_db(conn: &Connection) {
         conn.execute_batch(
             r#"
-            create table workflow_skills (
+            create table workflow_tools (
                 id integer primary key,
                 name text not null,
                 slug text not null,
@@ -875,7 +906,7 @@ mod tests {
                 created_at text not null,
                 updated_at text not null
             );
-            create table workflow_skill_versions (
+            create table workflow_tool_versions (
                 id integer primary key,
                 skill_id integer not null,
                 version integer not null,
@@ -888,7 +919,7 @@ mod tests {
                 created_from_run_id integer,
                 created_at text not null
             );
-            create table workflow_skill_arguments (
+            create table workflow_tool_arguments (
                 id integer primary key,
                 version_id integer not null,
                 name text not null,
@@ -901,7 +932,7 @@ mod tests {
                 is_dynamic integer not null,
                 order_index integer not null
             );
-            create table workflow_skill_examples (
+            create table workflow_tool_examples (
                 id integer primary key,
                 skill_id integer not null,
                 user_request text not null,
@@ -910,7 +941,7 @@ mod tests {
                 success_count integer not null default 0,
                 last_used_at text
             );
-            create table workflow_skill_steps (
+            create table workflow_tool_steps (
                 id integer primary key,
                 version_id integer not null,
                 order_index integer not null,
@@ -924,7 +955,7 @@ mod tests {
                 fallback_policy_json text not null,
                 update_policy_json text not null
             );
-            create table workflow_skill_resources (
+            create table workflow_tool_resources (
                 id integer primary key,
                 version_id integer not null,
                 resource_type text not null,
@@ -972,7 +1003,7 @@ mod tests {
                 finished_at text,
                 duration_ms integer
             );
-            create table skill_update_events (
+            create table workflow_tool_update_events (
                 id integer primary key,
                 skill_id integer not null,
                 from_version_id integer,
@@ -1032,20 +1063,20 @@ mod tests {
                 created_at text not null
             );
 
-            insert into workflow_skills values
+            insert into workflow_tools values
               (1, 'naver_stock_report', 'naver-stock-report', 'Naver stock report', 'naver.com', 'stock_report', 'stable', 2, '2026-06-09 00:00:00', '2026-06-09 00:02:00');
-            insert into workflow_skill_versions values
+            insert into workflow_tool_versions values
               (1, 1, 1, 'Initial version', '{"company_name":{"type":"string"}}', '{"report_text":"string"}', 'Load this workflow.', '{"metadata_first":true}', 'stable', null, '2026-06-09 00:00:00'),
               (2, 1, 2, 'Updated version', '{"company_name":{"type":"string"}}', '{"report_text":"string"}', 'Load this workflow. Update v2.', '{"metadata_first":true}', 'stable', 10, '2026-06-09 00:02:00');
-            insert into workflow_skill_arguments values
+            insert into workflow_tool_arguments values
               (1, 2, 'company_name', '검색할 기업명', 'string', 1, null, '{}', '["삼성전자"]', 1, 0);
-            insert into workflow_skill_examples values
+            insert into workflow_tool_examples values
               (1, 1, '네이버에서 삼성전자 주가 리포트', '{"company_name":"삼성전자","ticker":"005930","news_limit":3}', 'Markdown stock report', 2, '2026-06-09 00:04:30'),
               (2, 1, '네이버에서 SK하이닉스 주가 리포트', '{"company_name":"SK하이닉스","ticker":"000660","news_limit":3}', 'Markdown stock report', 1, null);
-            insert into workflow_skill_steps values
+            insert into workflow_tool_steps values
               (1, 2, 0, 'open_search', 'Open search page', 'goto', null, '{"url_template":"https://search.naver.com/search.naver?query={{company_name}} 주가"}', '{}', '{"url_contains":"search.naver.com"}', '{"retry":0}', '{"record_update_event":true}'),
               (2, 2, 1, 'extract_stock_card', 'Extract quote fields', 'run_handler', 'naver_stock.extract_stock_card', '{"handler":"naver_stock.extract_stock_card"}', '{}', '{"required_output":["company_name","current_price"]}', '{"retry":0}', '{"record_update_event":true}');
-            insert into workflow_skill_resources values
+            insert into workflow_tool_resources values
               (1, 2, 'report_template', 'stock_report_markdown', 'Report template', null, '# {{company_name}} 주가 리포트', '{"step":"render"}');
             insert into handler_registry values
               (1, 'naver_stock.extract_stock_card', 'Extract stock quote fields from Naver stock search text.', 'webworkflows.handlers.naver_stock', 'extract_stock_card', '{"page_text":"string"}', '{"current_price":"integer"}', '["naver.com"]');
@@ -1053,7 +1084,7 @@ mod tests {
               (10, 1, 2, '삼성전자 주가 리포트', '{"company_name":"삼성전자"}', 'succeeded', 0, null, '2026-06-09 00:03:00', '2026-06-09 00:03:01', 12, '{"report_text":"ok"}', '/tmp/report.md');
             insert into step_runs values
               (20, 10, 1, 'succeeded', '{}', '{}', '{"url":"https://search.naver.com"}', null, '2026-06-09 00:03:00', '2026-06-09 00:03:01', 4);
-            insert into skill_update_events values
+            insert into workflow_tool_update_events values
               (30, 1, 1, 2, 10, 'new_example', 'Observed request.', '{"example":"삼성전자"}', 'system', '2026-06-09 00:04:00');
             insert into workflow_update_proposals values
               (40, 1, 2, 3, 'Add valuation section.', 'none', 'agent_json', 'test-model',
@@ -1078,6 +1109,21 @@ mod tests {
         .expect("fixture schema");
     }
 
+    fn rename_fixture_tables_to_legacy_skill_names(conn: &Connection) {
+        conn.execute_batch(
+            r#"
+            alter table workflow_tools rename to workflow_skills;
+            alter table workflow_tool_versions rename to workflow_skill_versions;
+            alter table workflow_tool_arguments rename to workflow_skill_arguments;
+            alter table workflow_tool_examples rename to workflow_skill_examples;
+            alter table workflow_tool_steps rename to workflow_skill_steps;
+            alter table workflow_tool_resources rename to workflow_skill_resources;
+            alter table workflow_tool_update_events rename to skill_update_events;
+            "#,
+        )
+        .expect("legacy table rename");
+    }
+
     #[test]
     fn lists_workflow_cards_from_webmcp_db() {
         let temp = tempdir().expect("tempdir");
@@ -1093,6 +1139,24 @@ mod tests {
         assert_eq!(2, workflows[0].latest_version);
         assert_eq!(1, workflows[0].run_count);
         assert_eq!(12, workflows[0].last_run_duration_ms.unwrap());
+    }
+
+    #[test]
+    fn migrates_legacy_skill_tables_before_listing_workflows() {
+        let temp = tempdir().expect("tempdir");
+        let db_path = temp.path().join("workflows.sqlite");
+        let conn = Connection::open(&db_path).expect("open db");
+        create_fixture_db(&conn);
+        rename_fixture_tables_to_legacy_skill_names(&conn);
+        drop(conn);
+
+        let workflows = super::list_workflows(&db_path).expect("workflows");
+
+        assert_eq!(1, workflows.len());
+        assert_eq!("naver_stock_report", workflows[0].name);
+        let conn = Connection::open(&db_path).expect("open migrated db");
+        assert!(super::table_exists(&conn, "workflow_tools").expect("workflow_tools table check"));
+        assert!(!super::table_exists(&conn, "workflow_skills").expect("workflow_skills table check"));
     }
 
     #[test]

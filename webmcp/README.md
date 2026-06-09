@@ -87,12 +87,42 @@ flowchart LR
 
 ## 빠른 시작
 
+처음 온보딩하는 사람은 먼저 [Runbook](docs/RUNBOOK.md)을 따라가면 됩니다. 이
+README는 제품과 폴더 지도를 제공하고, Runbook은 실제 실행, DB 확인, 장애 대응,
+검증 매트릭스를 한 번에 제공합니다.
+
 Core 테스트:
 
 ```bash
 cd webmcp/core
-python3 -m unittest tests/test_repo_structure.py tests/test_workflow_runtime_service.py tests/test_workflow_update_runtime_service.py tests/test_synthesis_provider_port.py tests/test_workflow_skills.py tests/test_text_default_vision_fallback.py
+python3 -m unittest tests/test_repo_structure.py tests/test_workflow_runtime_service.py tests/test_workflow_update_runtime_service.py tests/test_synthesis_provider_port.py tests/test_workflow_tools.py tests/test_js_tool_conversion.py tests/test_text_default_vision_fallback.py
 ```
+
+DB에 저장된 workflow tool을 JavaScript tool로 변환:
+
+```bash
+cd webmcp/core
+python3 -m webworkflows.cli export-js-tool \
+  --db ~/.webmcp-studio/db/workflows.sqlite \
+  --workflow-name naver_stock_report \
+  --version 1 \
+  --output-dir outputs/js_tools
+
+python3 -m webworkflows.cli run-js-tool \
+  --tool-dir outputs/js_tools/naver-stock-report-v1 \
+  --arguments-file outputs/js_tools/naver_stock_args.json
+
+python3 -m webworkflows.cli eval-js-tool \
+  --tool-dir outputs/js_tools/naver-stock-report-v1 \
+  --arguments-file outputs/js_tools/naver_stock_args.json \
+  --required-output company_name \
+  --required-output ticker \
+  --required-output current_price \
+  --required-output report_text
+```
+
+Canonical workflow metadata table 이름은 `workflow_tools`와 `workflow_tool_*`입니다.
+기존 `workflow_skills` DB는 Core 초기화 시 자동으로 새 table 이름으로 migrate됩니다.
 
 Desktop 실행:
 
@@ -129,6 +159,7 @@ npm run db:sync-naver
 
 ## 문서 지도
 
+- [Runbook](docs/RUNBOOK.md): 처음 실행, DB 확인, 실제 workflow 실행, 장애 대응.
 - [아키텍처](docs/ARCHITECTURE.md): 경계, 의존성, 데이터 흐름.
 - [개발 가이드](docs/DEVELOPMENT.md): 설치, 실행, 검증 명령.
 - [Desktop 앱](docs/DESKTOP_APP.md): UI, IPC, sidecar, 실행/수정 동작.

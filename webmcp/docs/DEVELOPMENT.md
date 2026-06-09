@@ -2,6 +2,8 @@
 
 이 문서는 새 구조에서 어디서 어떤 명령을 실행해야 하는지 정리합니다. Python
 명령은 `webmcp/core`에서, Desktop 명령은 `webmcp/apps/desktop`에서 실행합니다.
+처음 환경을 띄우거나 장애 대응까지 한 번에 보려면 [RUNBOOK.md](RUNBOOK.md)를
+먼저 따라갑니다. 이 문서는 검증 명령을 빠르게 찾는 reference입니다.
 
 ## 개발 루프
 
@@ -27,7 +29,7 @@ flowchart LR
 
 ```bash
 cd webmcp/core
-python3 -m unittest tests/test_repo_structure.py tests/test_workflow_runtime_service.py tests/test_workflow_update_runtime_service.py tests/test_synthesis_provider_port.py tests/test_workflow_skills.py tests/test_text_default_vision_fallback.py
+python3 -m unittest tests/test_repo_structure.py tests/test_workflow_runtime_service.py tests/test_workflow_update_runtime_service.py tests/test_synthesis_provider_port.py tests/test_workflow_tools.py tests/test_text_default_vision_fallback.py
 ```
 
 `tests/test_repo_structure.py`는 feature slice 구조, 문서 entry point, 한글

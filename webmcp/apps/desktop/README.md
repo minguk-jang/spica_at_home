@@ -3,6 +3,8 @@
 이 디렉터리는 WebMCP workflow를 확인하고 관리하는 Electron + React 앱입니다.
 전체 프로젝트 지도는 [../../README.md](../../README.md)를 확인합니다. Desktop은
 workflow engine이 아니라 UI와 process orchestration을 담당합니다.
+처음 실행하거나 Tool list/DB 연결 문제를 확인할 때는
+[../../docs/RUNBOOK.md](../../docs/RUNBOOK.md)를 먼저 봅니다.
 
 ## 실행
 
@@ -144,7 +146,7 @@ sequenceDiagram
 수 있습니다.
 
 검증을 통과한 workflow는 실행에 사용한 argument set을 metadata로 저장합니다.
-Desktop의 Argument Examples 패널은 `workflow_skill_examples`와 argument별
+Desktop의 Argument Examples 패널은 `workflow_tool_examples`와 argument별
 `examples_json`을 읽어, 다음 QA나 재실행 때 바로 적용할 수 있는 예시 버튼을
 구성합니다. 예시 안의 일반 argument는 실행과 Eval & Evolve payload에 보존되고,
 Electron adapter가 Core CLI의 `--argument name=value` 옵션으로 전달합니다.

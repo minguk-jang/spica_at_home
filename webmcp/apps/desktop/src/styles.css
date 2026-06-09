@@ -1302,6 +1302,94 @@ th {
   font-size: 12px;
 }
 
+.scriptCodeGrid.compact {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.jsToolStudio {
+  display: grid;
+  gap: 18px;
+}
+
+.jsToolHero,
+.jsToolPanel,
+.jsToolResult {
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid rgba(60, 60, 67, 0.12);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.9);
+}
+
+.jsToolHero {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.jsToolHero h3 {
+  font-size: 16px;
+  line-height: 1.3;
+}
+
+.jsToolHero p {
+  margin-top: 5px;
+  max-width: 760px;
+  color: #6e6e73;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.jsToolGrid {
+  display: grid;
+  grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
+  gap: 18px;
+}
+
+.jsToolPanel {
+  display: grid;
+  align-content: start;
+  gap: 10px;
+}
+
+.jsToolActionRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.jsToolActionButton {
+  gap: 7px;
+}
+
+.jsToolActionButton.secondaryButton {
+  min-width: 118px;
+}
+
+.jsToolFacts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 8px;
+}
+
+.jsToolFacts .summaryItem {
+  min-height: 62px;
+}
+
+.jsToolFacts .summaryItem span,
+.jsToolFacts .summaryItem strong {
+  overflow: visible;
+  text-overflow: clip;
+  white-space: normal;
+  overflow-wrap: break-word;
+}
+
+.jsToolResult {
+  display: grid;
+  gap: 10px;
+}
+
 .resourcePicker {
   display: flex;
   flex-wrap: wrap;
@@ -1465,6 +1553,254 @@ th {
   color: #1d1d1f;
   font-size: 13px;
   line-height: 1.35;
+}
+
+.landingShell {
+  min-height: calc(100vh - 72px);
+  overflow: auto;
+  overflow-x: hidden;
+  padding: 22px;
+  background: #f5f5f7;
+}
+
+.landingHero {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(320px, 430px);
+  align-items: stretch;
+  gap: 22px;
+  margin: -22px -22px 0;
+  padding: 26px 22px 22px;
+  border-bottom: 1px solid rgba(60, 60, 67, 0.14);
+  background: #ffffff;
+}
+
+.landingHeroCopy {
+  display: grid;
+  align-content: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+.landingHeroCopy h2 {
+  max-width: 740px;
+  color: #1d1d1f;
+  font-size: 32px;
+  line-height: 1.15;
+}
+
+.landingHeroCopy > p:not(.eyebrow) {
+  max-width: 720px;
+  color: #526071;
+  font-size: 15px;
+  line-height: 1.6;
+}
+
+.landingActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.landingActions .primaryButton,
+.landingActions .secondaryButton {
+  gap: 7px;
+}
+
+.landingMetricGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.landingMetric {
+  display: grid;
+  align-content: start;
+  min-width: 0;
+  min-height: 132px;
+  gap: 9px;
+  padding: 14px;
+  border: 1px solid rgba(60, 60, 67, 0.12);
+  border-radius: 8px;
+  background: #f7f9fb;
+}
+
+.landingMetricHeader {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  gap: 8px;
+}
+
+.landingMetricHeader span:last-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #6e6e73;
+  font-size: 12px;
+  font-weight: 750;
+}
+
+.landingMetricIcon,
+.logicIcon {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border: 1px solid rgba(10, 132, 255, 0.18);
+  border-radius: 8px;
+  background: rgba(10, 132, 255, 0.08);
+  color: #0a84ff;
+}
+
+.landingMetric strong {
+  color: #1d1d1f;
+  font-size: 24px;
+  line-height: 1.15;
+}
+
+.landingMetric p {
+  color: #526071;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.landingSection {
+  display: grid;
+  gap: 14px;
+  margin-top: 22px;
+}
+
+.landingSectionHeader {
+  display: grid;
+  gap: 4px;
+  max-width: 760px;
+}
+
+.landingSectionHeader .sectionTitle {
+  margin-bottom: 0;
+}
+
+.landingSectionHeader h3 {
+  color: #1d1d1f;
+  font-size: 18px;
+  line-height: 1.35;
+}
+
+.logicDiagram {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(188px, 100%), 1fr));
+  align-items: stretch;
+  gap: 10px;
+}
+
+.logicNode {
+  display: grid;
+  align-content: start;
+  min-width: 0;
+  min-height: 214px;
+  gap: 9px;
+  padding: 14px;
+  border: 1px solid rgba(60, 60, 67, 0.12);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.92);
+  box-shadow: inset 3px 0 0 #0a84ff;
+}
+
+.logicNodeTop {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-width: 0;
+  gap: 10px;
+}
+
+.logicNode.green {
+  box-shadow: inset 3px 0 0 #34c759;
+}
+
+.logicNode.orange {
+  box-shadow: inset 3px 0 0 #ff9500;
+}
+
+.logicIcon.green {
+  border-color: rgba(52, 199, 89, 0.22);
+  background: rgba(52, 199, 89, 0.1);
+  color: #248a3d;
+}
+
+.logicIcon.orange {
+  border-color: rgba(255, 149, 0, 0.26);
+  background: rgba(255, 149, 0, 0.12);
+  color: #b25d00;
+}
+
+.logicStep {
+  width: max-content;
+  min-height: 24px;
+  padding: 3px 7px;
+  border: 1px solid rgba(60, 60, 67, 0.12);
+  border-radius: 8px;
+  background: #f7f9fb;
+  color: #526071;
+  font-size: 11px;
+  font-weight: 850;
+}
+
+.logicNode h4 {
+  color: #1d1d1f;
+  font-size: 14px;
+  line-height: 1.3;
+}
+
+.logicNode p {
+  color: #3a3a3c;
+  font-size: 12px;
+  line-height: 1.48;
+}
+
+.logicNode small {
+  color: #6e6e73;
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.tabGuideGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(230px, 100%), 1fr));
+  gap: 10px;
+}
+
+.tabGuideCard {
+  display: grid;
+  align-content: start;
+  min-width: 0;
+  min-height: 148px;
+  gap: 6px;
+  padding: 13px;
+  border: 1px solid rgba(60, 60, 67, 0.12);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.9);
+}
+
+.tabGuideCard h4 {
+  color: #1d1d1f;
+  font-size: 14px;
+  line-height: 1.3;
+}
+
+.tabGuideCard p {
+  color: #3a3a3c;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.tabGuideCard span {
+  color: #6e6e73;
+  font-size: 12px;
+  line-height: 1.45;
 }
 
 .memoryShell {
@@ -1921,6 +2257,19 @@ th {
   .metricStrip {
     grid-template-columns: repeat(2, 88px);
   }
+
+  .landingHero {
+    grid-template-columns: 1fr;
+  }
+
+  .landingMetricGrid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .logicNode {
+    min-height: 0;
+  }
+
 }
 
 @media (max-width: 860px) {
@@ -1928,8 +2277,11 @@ th {
   .contentGrid,
   .detailHeader,
   .memoryHeader,
+  .landingHero,
   .splitLayout,
   .scriptGrid,
+  .jsToolHero,
+  .jsToolGrid,
   .memoryGrid,
   .dashboardGrid {
     display: block;
@@ -1939,12 +2291,24 @@ th {
     height: auto;
   }
 
+  .brand {
+    min-width: 0;
+  }
+
+  .brand h1,
+  .brand p {
+    overflow-wrap: anywhere;
+  }
+
   .topActions,
   .formGrid,
   .runActionRow,
   .updateControlGrid,
   .evolutionControlGrid,
   .evolutionSummaryStrip,
+  .landingActions,
+  .landingMetricGrid,
+  .tabGuideGrid,
   .memoryToolbar,
   .memorySummaryGrid,
   .memoryFactGrid,
@@ -1952,6 +2316,7 @@ th {
   .modeSelector,
   .proposalGrid,
   .scriptFacts,
+  .jsToolFacts,
   .scriptCodeGrid {
     display: grid;
     grid-template-columns: 1fr;
@@ -1995,6 +2360,29 @@ th {
 
   .metricStrip {
     margin-top: 12px;
+  }
+
+  .landingShell {
+    padding: 16px;
+  }
+
+  .landingHero {
+    margin: -16px -16px 0;
+    padding: 22px 16px 18px;
+  }
+
+  .landingHeroCopy h2 {
+    font-size: 26px;
+    line-height: 1.16;
+  }
+
+  .landingHeroCopy > p:not(.eyebrow) {
+    font-size: 14px;
+  }
+
+  .landingMetric,
+  .tabGuideCard {
+    min-height: 0;
   }
 
   .timelineRow {

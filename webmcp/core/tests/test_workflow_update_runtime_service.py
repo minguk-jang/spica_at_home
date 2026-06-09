@@ -25,7 +25,7 @@ NAVER_STOCK_TEXT = """
 class WorkflowUpdateRuntimeServiceTest(unittest.TestCase):
     def test_propose_and_apply_return_cli_compatible_payloads(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
-            db_path = Path(tmp) / "workflow_skills.sqlite"
+            db_path = Path(tmp) / "workflow_tools.sqlite"
             workflow_json_path = Path(tmp) / "proposal.json"
             proposed = naver_stock_workflow_json()
             proposed["body_md"] = proposed["body_md"] + "\n\nInclude valuation metrics in the report."

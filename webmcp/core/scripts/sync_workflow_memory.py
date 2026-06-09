@@ -100,7 +100,7 @@ def load_fixture_records(fixture_dir: Path) -> Iterable[dict[str, Any]]:
 def sync_workflow_example(conn: Any, record: dict[str, Any], result: SyncResult, *, dry_run: bool) -> None:
     workflow_name = required_string(record, "workflow_name")
     skill = conn.execute(
-        "select id, latest_version_id from workflow_skills where name = ?",
+        "select id, latest_version_id from workflow_tools where name = ?",
         (workflow_name,),
     ).fetchone()
     if not skill:
@@ -112,7 +112,7 @@ def sync_workflow_example(conn: Any, record: dict[str, Any], result: SyncResult,
     existing = conn.execute(
         """
         select id
-        from workflow_skill_examples
+        from workflow_tool_examples
         where skill_id = ? and normalized_arguments_json = ?
         """,
         (skill["id"], arguments_json),
@@ -123,7 +123,7 @@ def sync_workflow_example(conn: Any, record: dict[str, Any], result: SyncResult,
         if not dry_run:
             conn.execute(
                 """
-                update workflow_skill_examples
+                update workflow_tool_examples
                 set user_request = ?, expected_output_summary = ?
                 where id = ?
                 """,
@@ -138,7 +138,7 @@ def sync_workflow_example(conn: Any, record: dict[str, Any], result: SyncResult,
         if not dry_run:
             conn.execute(
                 """
-                insert into workflow_skill_examples
+                insert into workflow_tool_examples
                   (skill_id, user_request, normalized_arguments_json, expected_output_summary)
                 values (?, ?, ?, ?)
                 """,
@@ -159,7 +159,7 @@ def merge_argument_examples(conn: Any, version_id: int, arguments: dict[str, Any
         row = conn.execute(
             """
             select id, examples_json
-            from workflow_skill_arguments
+            from workflow_tool_arguments
             where version_id = ? and name = ?
             """,
             (version_id, name),
@@ -173,7 +173,7 @@ def merge_argument_examples(conn: Any, version_id: int, arguments: dict[str, Any
             continue
         examples.append(value)
         conn.execute(
-            "update workflow_skill_arguments set examples_json = ? where id = ?",
+            "update workflow_tool_arguments set examples_json = ? where id = ?",
             (dumps(examples), row["id"]),
         )
 

@@ -67,7 +67,7 @@ runtime을 사용한다. Renderer fallback도 같은 구조를 가리키게 한�
 
 ```bash
 cd webmcp/core
-python3 -m unittest tests/test_repo_structure.py tests/test_workflow_skills.py tests/test_text_default_vision_fallback.py
+python3 -m unittest tests/test_repo_structure.py tests/test_workflow_tools.py tests/test_text_default_vision_fallback.py
 
 cd ../apps/desktop
 npm run test:unit

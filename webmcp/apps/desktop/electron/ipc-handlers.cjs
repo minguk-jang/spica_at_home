@@ -86,6 +86,24 @@ function registerWebmcpIpcHandlers({
     });
   });
 
+  ipcMain.handle("webmcp:export-js-tool", async (event, payload) => {
+    return withQueueLock("A run or JavaScript tool job is already active.", async () => {
+      return coreClient.exportJsTool({ sender: event.sender, payload });
+    });
+  });
+
+  ipcMain.handle("webmcp:run-js-tool", async (event, payload) => {
+    return withQueueLock("A run or JavaScript tool job is already active.", async () => {
+      return coreClient.runJsTool({ sender: event.sender, payload });
+    });
+  });
+
+  ipcMain.handle("webmcp:eval-js-tool", async (event, payload) => {
+    return withQueueLock("A run or JavaScript tool job is already active.", async () => {
+      return coreClient.evalJsTool({ sender: event.sender, payload });
+    });
+  });
+
   ipcMain.handle("webmcp:pause-current-job", async (event) => {
     return coreClient.pauseActiveJob({ sender: event.sender });
   });

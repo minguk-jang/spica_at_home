@@ -23,7 +23,7 @@ class WorkflowSkillEvolver:
         with self.store.connect() as conn:
             latest = conn.execute(
                 """
-                select * from workflow_skill_versions
+                select * from workflow_tool_versions
                 where id = ?
                 """,
                 (skill.version_id,),
@@ -36,7 +36,7 @@ class WorkflowSkillEvolver:
             new_version_id = int(
                 conn.execute(
                     """
-                    insert into workflow_skill_versions
+                    insert into workflow_tool_versions
                       (skill_id, version, summary, input_schema_json, output_schema_json,
                        body_md, load_policy_json, created_from_run_id, status)
                     values (?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -62,7 +62,7 @@ class WorkflowSkillEvolver:
             if update_type == "new_example" and diff.get("example"):
                 conn.execute(
                     """
-                    insert into workflow_skill_examples
+                    insert into workflow_tool_examples
                       (skill_id, user_request, normalized_arguments_json, expected_output_summary, success_count)
                     values (?, ?, ?, ?, ?)
                     """,
@@ -76,12 +76,12 @@ class WorkflowSkillEvolver:
                 )
 
             conn.execute(
-                "update workflow_skills set latest_version_id = ?, updated_at = current_timestamp where id = ?",
+                "update workflow_tools set latest_version_id = ?, updated_at = current_timestamp where id = ?",
                 (new_version_id, skill.id),
             )
             conn.execute(
                 """
-                insert into skill_update_events
+                insert into workflow_tool_update_events
                   (skill_id, from_version_id, to_version_id, run_id, update_type, reason, diff_json, approved_by)
                 values (?, ?, ?, ?, ?, ?, ?, ?)
                 """,
@@ -91,13 +91,13 @@ class WorkflowSkillEvolver:
 
     def _copy_arguments(self, conn, from_version_id: int, to_version_id: int) -> None:
         rows = conn.execute(
-            "select * from workflow_skill_arguments where version_id = ? order by order_index",
+            "select * from workflow_tool_arguments where version_id = ? order by order_index",
             (from_version_id,),
         ).fetchall()
         for row in rows:
             conn.execute(
                 """
-                insert into workflow_skill_arguments
+                insert into workflow_tool_arguments
                   (version_id, name, description, type, required, default_value_json,
                    validation_json, examples_json, is_dynamic, order_index)
                 values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -118,13 +118,13 @@ class WorkflowSkillEvolver:
 
     def _copy_steps(self, conn, from_version_id: int, to_version_id: int) -> None:
         rows = conn.execute(
-            "select * from workflow_skill_steps where version_id = ? order by order_index",
+            "select * from workflow_tool_steps where version_id = ? order by order_index",
             (from_version_id,),
         ).fetchall()
         for row in rows:
             conn.execute(
                 """
-                insert into workflow_skill_steps
+                insert into workflow_tool_steps
                   (version_id, order_index, name, description, step_type, handler_ref,
                    action_json, argument_bindings_json, assertions_json,
                    fallback_policy_json, update_policy_json)
@@ -147,13 +147,13 @@ class WorkflowSkillEvolver:
 
     def _copy_resources(self, conn, from_version_id: int, to_version_id: int) -> None:
         rows = conn.execute(
-            "select * from workflow_skill_resources where version_id = ?",
+            "select * from workflow_tool_resources where version_id = ?",
             (from_version_id,),
         ).fetchall()
         for row in rows:
             conn.execute(
                 """
-                insert into workflow_skill_resources
+                insert into workflow_tool_resources
                   (version_id, resource_type, name, description, content_json, content_text, load_when_json)
                 values (?, ?, ?, ?, ?, ?, ?)
                 """,

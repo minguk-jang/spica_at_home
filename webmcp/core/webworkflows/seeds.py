@@ -24,7 +24,7 @@ NAVER_STOCK_REPORT_EXAMPLES = [
 def seed_naver_stock_report(store: WorkflowSkillStore) -> None:
     with store.connect() as conn:
         existing = conn.execute(
-            "select id from workflow_skills where name = ?",
+            "select id from workflow_tools where name = ?",
             ("naver_stock_report",),
         ).fetchone()
         if existing:
@@ -33,7 +33,7 @@ def seed_naver_stock_report(store: WorkflowSkillStore) -> None:
 
         skill_id = conn.execute(
             """
-            insert into workflow_skills
+            insert into workflow_tools
               (name, slug, description, domain, task_type, status)
             values (?, ?, ?, ?, ?, ?)
             """,
@@ -49,7 +49,7 @@ def seed_naver_stock_report(store: WorkflowSkillStore) -> None:
 
         version_id = conn.execute(
             """
-            insert into workflow_skill_versions
+            insert into workflow_tool_versions
               (skill_id, version, summary, input_schema_json, output_schema_json, body_md, load_policy_json, status)
             values (?, ?, ?, ?, ?, ?, ?, ?)
             """,
@@ -81,7 +81,7 @@ def seed_naver_stock_report(store: WorkflowSkillStore) -> None:
         ).lastrowid
 
         conn.execute(
-            "update workflow_skills set latest_version_id = ? where id = ?",
+            "update workflow_tools set latest_version_id = ? where id = ?",
             (version_id, skill_id),
         )
 
@@ -97,7 +97,7 @@ def seed_naver_stock_report(store: WorkflowSkillStore) -> None:
             name, description, typ, required, default_value, validation, examples_json, is_dynamic = arg
             conn.execute(
                 """
-                insert into workflow_skill_arguments
+                insert into workflow_tool_arguments
                   (version_id, name, description, type, required, default_value_json,
                    validation_json, examples_json, is_dynamic, order_index)
                 values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -167,7 +167,7 @@ def seed_naver_stock_report(store: WorkflowSkillStore) -> None:
             name, description, step_type, handler_ref, action, bindings, assertions = step
             conn.execute(
                 """
-                insert into workflow_skill_steps
+                insert into workflow_tool_steps
                   (version_id, order_index, name, description, step_type, handler_ref,
                    action_json, argument_bindings_json, assertions_json,
                    fallback_policy_json, update_policy_json)
@@ -190,7 +190,7 @@ def seed_naver_stock_report(store: WorkflowSkillStore) -> None:
 
         conn.execute(
             """
-            insert into workflow_skill_resources
+            insert into workflow_tool_resources
               (version_id, resource_type, name, description, content_json, content_text, load_when_json)
             values (?, ?, ?, ?, ?, ?, ?)
             """,
@@ -236,7 +236,7 @@ def _ensure_naver_stock_report_examples(conn, skill_id: int) -> None:
     for row in conn.execute(
         """
         select normalized_arguments_json
-        from workflow_skill_examples
+        from workflow_tool_examples
         where skill_id = ?
         """,
         (skill_id,),
@@ -251,7 +251,7 @@ def _ensure_naver_stock_report_examples(conn, skill_id: int) -> None:
             continue
         conn.execute(
             """
-            insert into workflow_skill_examples
+            insert into workflow_tool_examples
               (skill_id, user_request, normalized_arguments_json, expected_output_summary)
             values (?, ?, ?, ?)
             """,

@@ -1,9 +1,13 @@
 const fs = require("fs");
+const path = require("path");
 const {
   buildPythonCreateWorkflowArgs,
   buildPythonEvolveArgs,
+  buildPythonEvalJsToolArgs,
+  buildPythonExportJsToolArgs,
   buildPythonProposeArgs,
-  buildPythonRunArgs
+  buildPythonRunArgs,
+  buildPythonRunJsToolArgs
 } = require("./update-command.cjs");
 const {
   collectProcess: defaultCollectProcess,
@@ -181,6 +185,82 @@ function createWebmcpCoreClient(options) {
     return job;
   }
 
+  async function exportJsTool({ sender, payload }) {
+    const jobId = nextJobId++;
+    const startedAt = now();
+    const jobBase = {
+      jobId,
+      workflowName: payload.workflowName,
+      version: payload.version,
+      startedAt
+    };
+    emitRunEvent(sender, { type: "js-tool-export-started", ...jobBase });
+    const result = await runPythonCli(
+      buildPythonExportJsToolArgs(payload, defaultJsToolOutputDir()),
+      payload.repoRoot || repoRoot,
+      payload.pythonPath
+    );
+    const job = buildCliJobResult({
+      ...jobBase,
+      type: "js-tool-export-finished",
+      result,
+      finishedAt: now(),
+      nowMs
+    });
+    emitRunEvent(sender, job);
+    return job;
+  }
+
+  async function runJsTool({ sender, payload }) {
+    const jobId = nextJobId++;
+    const startedAt = now();
+    const jobBase = {
+      jobId,
+      toolDir: payload.toolDir,
+      startedAt
+    };
+    emitRunEvent(sender, { type: "js-tool-run-started", ...jobBase });
+    const result = await runPythonCli(
+      buildPythonRunJsToolArgs(payload),
+      payload.repoRoot || repoRoot,
+      payload.pythonPath
+    );
+    const job = buildCliJobResult({
+      ...jobBase,
+      type: "js-tool-run-finished",
+      result,
+      finishedAt: now(),
+      nowMs
+    });
+    emitRunEvent(sender, job);
+    return job;
+  }
+
+  async function evalJsTool({ sender, payload }) {
+    const jobId = nextJobId++;
+    const startedAt = now();
+    const jobBase = {
+      jobId,
+      toolDir: payload.toolDir,
+      startedAt
+    };
+    emitRunEvent(sender, { type: "js-tool-eval-started", ...jobBase });
+    const result = await runPythonCli(
+      buildPythonEvalJsToolArgs(payload),
+      payload.repoRoot || repoRoot,
+      payload.pythonPath
+    );
+    const job = buildCliJobResult({
+      ...jobBase,
+      type: "js-tool-eval-finished",
+      result,
+      finishedAt: now(),
+      nowMs
+    });
+    emitRunEvent(sender, job);
+    return job;
+  }
+
   async function applyProposal({ sender, payload }) {
     const jobId = nextJobId++;
     const startedAt = now();
@@ -217,14 +297,21 @@ function createWebmcpCoreClient(options) {
   return {
     applyProposal,
     createWorkflow,
+    evalJsTool,
     evolveWorkflow,
+    exportJsTool,
     pauseActiveJob,
     proposeUpdate,
     resumeActiveJob,
+    runJsTool,
     runVersion,
     runVersionQueue,
     pythonCommand
   };
+
+  function defaultJsToolOutputDir() {
+    return path.join(defaultOutputDir || "outputs/desktop_runs", "js_tools");
+  }
 }
 
 function buildCliJobResult({ type, result, finishedAt, nowMs, ...jobBase }) {

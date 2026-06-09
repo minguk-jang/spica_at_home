@@ -263,7 +263,7 @@ class WorkflowCreationRuntimeServiceTest(unittest.TestCase):
 
     def test_materializer_reuses_existing_workflow_when_slug_matches(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
-            store = WorkflowSkillStore(Path(tmp) / "workflow_skills.sqlite")
+            store = WorkflowSkillStore(Path(tmp) / "workflow_tools.sqlite")
             store.initialize()
             first = generic_flight_workflow_json()
             second = {**generic_flight_workflow_json(), "skill_name": "renamed_flight_search_report"}
@@ -317,7 +317,7 @@ class WorkflowCreationRuntimeServiceTest(unittest.TestCase):
         ]
 
         with tempfile.TemporaryDirectory() as tmp:
-            db_path = Path(tmp) / "workflow_skills.sqlite"
+            db_path = Path(tmp) / "workflow_tools.sqlite"
             output_dir = Path(tmp) / "runs"
             store = WorkflowSkillStore(db_path)
             store.initialize()
@@ -393,7 +393,7 @@ class WorkflowCreationRuntimeServiceTest(unittest.TestCase):
 
     def test_create_workflow_runs_naver_map_route_with_browser_evaluation_text(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
-            db_path = Path(tmp) / "workflow_skills.sqlite"
+            db_path = Path(tmp) / "workflow_tools.sqlite"
             output_dir = Path(tmp) / "runs"
             store = WorkflowSkillStore(db_path)
             store.initialize()
@@ -445,7 +445,7 @@ class WorkflowCreationRuntimeServiceTest(unittest.TestCase):
 
     def test_create_workflow_uses_inferred_station_examples_for_first_run(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
-            db_path = Path(tmp) / "workflow_skills.sqlite"
+            db_path = Path(tmp) / "workflow_tools.sqlite"
             output_dir = Path(tmp) / "runs"
             store = WorkflowSkillStore(db_path)
             store.initialize()
@@ -485,7 +485,7 @@ class WorkflowCreationRuntimeServiceTest(unittest.TestCase):
 
     def test_create_workflow_records_argument_example_metadata_after_success(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
-            db_path = Path(tmp) / "workflow_skills.sqlite"
+            db_path = Path(tmp) / "workflow_tools.sqlite"
             output_dir = Path(tmp) / "runs"
             store = WorkflowSkillStore(db_path)
             store.initialize()
@@ -528,7 +528,7 @@ class WorkflowCreationRuntimeServiceTest(unittest.TestCase):
                 example = conn.execute(
                     """
                     select user_request, normalized_arguments_json, expected_output_summary, success_count
-                    from workflow_skill_examples
+                    from workflow_tool_examples
                     where skill_id = ?
                     """,
                     (payload["created_skill_id"],),
@@ -547,7 +547,7 @@ class WorkflowCreationRuntimeServiceTest(unittest.TestCase):
 
     def test_create_workflow_materializes_verified_tool_and_records_session(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
-            db_path = Path(tmp) / "workflow_skills.sqlite"
+            db_path = Path(tmp) / "workflow_tools.sqlite"
             output_dir = Path(tmp) / "runs"
             store = WorkflowSkillStore(db_path)
             store.initialize()
@@ -569,6 +569,7 @@ class WorkflowCreationRuntimeServiceTest(unittest.TestCase):
             self.assertEqual("succeeded", payload["status"])
             self.assertEqual("naver_stock_report", payload["workflow"])
             self.assertEqual(1, payload["workflow_version"])
+            self.assertEqual(payload["created_skill_id"], payload["created_tool_id"])
             self.assertGreaterEqual(payload["creation_session_id"], 1)
             self.assertGreaterEqual(payload["discovery_duration_ms"], 0)
             self.assertGreaterEqual(payload["synthesis_duration_ms"], 0)
@@ -580,7 +581,7 @@ class WorkflowCreationRuntimeServiceTest(unittest.TestCase):
                 conn.row_factory = sqlite3.Row
                 session = conn.execute("select * from workflow_creation_sessions").fetchone()
                 attempt = conn.execute("select * from workflow_creation_attempts").fetchone()
-                skill_count = conn.execute("select count(*) from workflow_skills").fetchone()[0]
+                skill_count = conn.execute("select count(*) from workflow_tools").fetchone()[0]
 
             self.assertEqual(1, skill_count)
             self.assertEqual("succeeded", session["status"])
@@ -593,7 +594,7 @@ class WorkflowCreationRuntimeServiceTest(unittest.TestCase):
 
     def test_create_workflow_supports_generic_non_stock_workflow_arguments(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
-            db_path = Path(tmp) / "workflow_skills.sqlite"
+            db_path = Path(tmp) / "workflow_tools.sqlite"
             output_dir = Path(tmp) / "runs"
             store = WorkflowSkillStore(db_path)
             store.initialize()
@@ -618,7 +619,7 @@ class WorkflowCreationRuntimeServiceTest(unittest.TestCase):
 
     def test_create_workflow_publishes_repaired_final_version_after_eval_evolve(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
-            db_path = Path(tmp) / "workflow_skills.sqlite"
+            db_path = Path(tmp) / "workflow_tools.sqlite"
             output_dir = Path(tmp) / "runs"
             store = WorkflowSkillStore(db_path)
             store.initialize()
@@ -675,9 +676,9 @@ class WorkflowCreationRuntimeServiceTest(unittest.TestCase):
 
             with sqlite3.connect(db_path) as conn:
                 conn.row_factory = sqlite3.Row
-                skill = conn.execute("select * from workflow_skills where name = ?", ("naver_stock_report",)).fetchone()
+                skill = conn.execute("select * from workflow_tools where name = ?", ("naver_stock_report",)).fetchone()
                 latest_version = conn.execute(
-                    "select version from workflow_skill_versions where id = ?",
+                    "select version from workflow_tool_versions where id = ?",
                     (skill["latest_version_id"],),
                 ).fetchone()
                 session = conn.execute("select * from workflow_creation_sessions").fetchone()
@@ -688,7 +689,7 @@ class WorkflowCreationRuntimeServiceTest(unittest.TestCase):
 
     def test_create_workflow_keeps_repaired_versions_draft_when_eval_evolve_never_passes(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
-            db_path = Path(tmp) / "workflow_skills.sqlite"
+            db_path = Path(tmp) / "workflow_tools.sqlite"
             output_dir = Path(tmp) / "runs"
             store = WorkflowSkillStore(db_path)
             store.initialize()
@@ -743,9 +744,9 @@ class WorkflowCreationRuntimeServiceTest(unittest.TestCase):
 
             with sqlite3.connect(db_path) as conn:
                 conn.row_factory = sqlite3.Row
-                skill = conn.execute("select * from workflow_skills where name = ?", ("naver_stock_report",)).fetchone()
+                skill = conn.execute("select * from workflow_tools where name = ?", ("naver_stock_report",)).fetchone()
                 versions = conn.execute(
-                    "select id, version, status from workflow_skill_versions order by version"
+                    "select id, version, status from workflow_tool_versions order by version"
                 ).fetchall()
                 session = conn.execute("select * from workflow_creation_sessions").fetchone()
 
@@ -757,7 +758,7 @@ class WorkflowCreationRuntimeServiceTest(unittest.TestCase):
 
     def test_cli_create_workflow_accepts_start_url_task_and_final_state(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
-            db_path = Path(tmp) / "workflow_skills.sqlite"
+            db_path = Path(tmp) / "workflow_tools.sqlite"
             output_dir = Path(tmp) / "runs"
             page_text_path = Path(tmp) / "page.txt"
             page_text_path.write_text(TRACE_TEXT, encoding="utf-8")
@@ -803,7 +804,7 @@ class WorkflowCreationRuntimeServiceTest(unittest.TestCase):
 
     def test_cli_create_workflow_does_not_inject_stock_arguments_by_default(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
-            db_path = Path(tmp) / "workflow_skills.sqlite"
+            db_path = Path(tmp) / "workflow_tools.sqlite"
             output_dir = Path(tmp) / "runs"
             page_text_path = Path(tmp) / "page.txt"
             workflow_path = Path(tmp) / "flight_workflow.json"

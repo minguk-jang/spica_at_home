@@ -335,7 +335,7 @@ class WorkflowMaterializer:
     ) -> tuple[int, int]:
         with self.store.connect() as conn:
             existing = conn.execute(
-                "select id, latest_version_id from workflow_skills where name = ? or slug = ?",
+                "select id, latest_version_id from workflow_tools where name = ? or slug = ?",
                 (discovery.skill_name, discovery.slug),
             ).fetchone()
             if existing:
@@ -344,7 +344,7 @@ class WorkflowMaterializer:
             skill_id = int(
                 conn.execute(
                     """
-                    insert into workflow_skills
+                    insert into workflow_tools
                       (name, slug, description, domain, task_type, status)
                     values (?, ?, ?, ?, ?, ?)
                     """,
@@ -361,7 +361,7 @@ class WorkflowMaterializer:
             version_id = int(
                 conn.execute(
                     """
-                    insert into workflow_skill_versions
+                    insert into workflow_tool_versions
                       (skill_id, version, summary, input_schema_json, output_schema_json,
                        body_md, load_policy_json, status)
                     values (?, ?, ?, ?, ?, ?, ?, ?)
@@ -379,13 +379,13 @@ class WorkflowMaterializer:
                 ).lastrowid
             )
             conn.execute(
-                "update workflow_skills set latest_version_id = ? where id = ?",
+                "update workflow_tools set latest_version_id = ? where id = ?",
                 (version_id, skill_id),
             )
             for argument in discovery.arguments:
                 conn.execute(
                     """
-                    insert into workflow_skill_arguments
+                    insert into workflow_tool_arguments
                       (version_id, name, description, type, required, default_value_json,
                        validation_json, examples_json, is_dynamic, order_index)
                     values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -406,7 +406,7 @@ class WorkflowMaterializer:
             for index, step in enumerate(discovery.steps):
                 conn.execute(
                     """
-                    insert into workflow_skill_steps
+                    insert into workflow_tool_steps
                       (version_id, order_index, name, description, step_type, handler_ref,
                        action_json, argument_bindings_json, assertions_json,
                        fallback_policy_json, update_policy_json)
@@ -429,7 +429,7 @@ class WorkflowMaterializer:
             for resource in discovery.resources:
                 conn.execute(
                     """
-                    insert into workflow_skill_resources
+                    insert into workflow_tool_resources
                       (version_id, resource_type, name, description, content_json, content_text, load_when_json)
                     values (?, ?, ?, ?, ?, ?, ?)
                     """,

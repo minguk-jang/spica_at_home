@@ -227,7 +227,7 @@ function renderStepPreview(step: WorkflowStep, handlers: WorkflowHandler[]): str
   if (step.stepType === "assert_output") {
     return [
       ...lines,
-      `${prefix}# Output assertions from workflow_skill_steps.assertions_json:`,
+      `${prefix}# Output assertions from workflow_tool_steps.assertions_json:`,
       `${prefix}# ${oneLineJson(step.assertions)}`
     ];
   }

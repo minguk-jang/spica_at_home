@@ -283,6 +283,26 @@ export type CreateWorkflowPayload = {
   evalBrowser?: "chromium" | "firefox" | "webkit";
 };
 
+export type JsToolExportPayload = {
+  dbPath: string;
+  repoRoot: string;
+  outputDir: string;
+  pythonPath?: string;
+  workflowName: string;
+  version: number;
+};
+
+export type JsToolRunPayload = {
+  repoRoot: string;
+  pythonPath?: string;
+  toolDir: string;
+  arguments: Record<string, unknown>;
+};
+
+export type JsToolEvalPayload = JsToolRunPayload & {
+  requiredOutput: string[];
+};
+
 export type ApplyProposalPayload = {
   dbPath: string;
   repoRoot: string;
@@ -322,6 +342,9 @@ declare global {
       watchVersion: (payload: RunPayload) => Promise<unknown>;
       evolveWorkflow: (payload: EvolveWorkflowPayload) => Promise<unknown>;
       createWorkflow: (payload: CreateWorkflowPayload) => Promise<unknown>;
+      exportJsTool: (payload: JsToolExportPayload) => Promise<RunEvent>;
+      runJsTool: (payload: JsToolRunPayload) => Promise<RunEvent>;
+      evalJsTool: (payload: JsToolEvalPayload) => Promise<RunEvent>;
       pauseCurrentJob: () => Promise<unknown>;
       resumeCurrentJob: () => Promise<unknown>;
       proposeUpdate: (payload: UpdateProposalPayload) => Promise<unknown>;

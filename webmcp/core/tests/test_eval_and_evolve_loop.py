@@ -323,7 +323,7 @@ class EvalAndEvolveLoopTest(unittest.TestCase):
 
     def test_executor_marks_dynamic_browser_workflow_as_llm_used_after_eval_runtime(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
-            db_path = Path(tmp) / "workflow_skills.sqlite"
+            db_path = Path(tmp) / "workflow_tools.sqlite"
             output_dir = Path(tmp) / "runs"
             store = WorkflowSkillStore(db_path)
             store.initialize()
@@ -395,7 +395,7 @@ class EvalAndEvolveLoopTest(unittest.TestCase):
                 dynamic_step = conn.execute(
                     """
                     select action_json
-                    from workflow_skill_steps
+                    from workflow_tool_steps
                     where step_type = 'llm_browser_action'
                     """
                 ).fetchone()
@@ -409,7 +409,7 @@ class EvalAndEvolveLoopTest(unittest.TestCase):
 
     def test_executor_rejects_dynamic_browser_step_without_browser_runtime(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
-            db_path = Path(tmp) / "workflow_skills.sqlite"
+            db_path = Path(tmp) / "workflow_tools.sqlite"
             output_dir = Path(tmp) / "runs"
             store = WorkflowSkillStore(db_path)
             store.initialize()
@@ -636,7 +636,7 @@ class EvalAndEvolveLoopTest(unittest.TestCase):
 
     def test_executor_uses_browser_state_output_from_evaluation_report(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
-            db_path = Path(tmp) / "workflow_skills.sqlite"
+            db_path = Path(tmp) / "workflow_tools.sqlite"
             output_dir = Path(tmp) / "runs"
             store = WorkflowSkillStore(db_path)
             store.initialize()
@@ -1055,7 +1055,7 @@ class EvalAndEvolveLoopTest(unittest.TestCase):
 
     def test_executor_fails_run_when_browser_evaluation_fails(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
-            db_path = Path(tmp) / "workflow_skills.sqlite"
+            db_path = Path(tmp) / "workflow_tools.sqlite"
             output_dir = Path(tmp) / "runs"
             store = WorkflowSkillStore(db_path)
             store.initialize()
@@ -1112,7 +1112,7 @@ class EvalAndEvolveLoopTest(unittest.TestCase):
 
     def test_executor_uses_browser_evaluation_page_text_for_deterministic_run(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
-            db_path = Path(tmp) / "workflow_skills.sqlite"
+            db_path = Path(tmp) / "workflow_tools.sqlite"
             output_dir = Path(tmp) / "runs"
             store = WorkflowSkillStore(db_path)
             store.initialize()
@@ -1165,7 +1165,7 @@ class EvalAndEvolveLoopTest(unittest.TestCase):
 
     def test_executor_does_not_recheck_browser_wait_step_against_final_eval_text(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
-            db_path = Path(tmp) / "workflow_skills.sqlite"
+            db_path = Path(tmp) / "workflow_tools.sqlite"
             output_dir = Path(tmp) / "runs"
             store = WorkflowSkillStore(db_path)
             store.initialize()
@@ -1217,7 +1217,7 @@ class EvalAndEvolveLoopTest(unittest.TestCase):
                     """
                     select sr.evidence_json
                     from step_runs sr
-                    join workflow_skill_steps ws on ws.id = sr.step_id
+                    join workflow_tool_steps ws on ws.id = sr.step_id
                     where ws.name = 'wait_intermediate_ad_dismissed'
                     """
                 ).fetchone()
@@ -1226,7 +1226,7 @@ class EvalAndEvolveLoopTest(unittest.TestCase):
 
     def test_cold_init_first_run_uses_eval_and_evolve_loop(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
-            db_path = Path(tmp) / "workflow_skills.sqlite"
+            db_path = Path(tmp) / "workflow_tools.sqlite"
             output_dir = Path(tmp) / "runs"
             store = WorkflowSkillStore(db_path)
             store.initialize()

@@ -1,4 +1,4 @@
-export type ActiveJobKind = "run" | "update" | "apply" | "evolution" | "creation";
+export type ActiveJobKind = "run" | "update" | "apply" | "evolution" | "creation" | "jsTool";
 
 export type ActiveJob = {
   kind: ActiveJobKind;
@@ -21,6 +21,8 @@ export function activeJobTitle(job: ActiveJob): string {
       return withWorkflowVersion("Eval & evolve", job);
     case "creation":
       return "Create workflow from browser task";
+    case "jsTool":
+      return withWorkflowVersion("JavaScript tool", job);
   }
 }
 

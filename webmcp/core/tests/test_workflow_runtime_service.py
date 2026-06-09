@@ -26,7 +26,7 @@ KRX 06.08. 16:10 장마감
 class WorkflowRuntimeServiceTest(unittest.TestCase):
     def test_run_version_returns_cli_compatible_payload(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
-            db_path = Path(tmp) / "workflow_skills.sqlite"
+            db_path = Path(tmp) / "workflow_tools.sqlite"
             output_dir = Path(tmp) / "runs"
             store = WorkflowSkillStore(db_path)
             store.initialize()
@@ -72,7 +72,7 @@ class WorkflowRuntimeServiceTest(unittest.TestCase):
 
     def test_run_latest_searches_workflow_and_returns_latest_version_payload(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
-            db_path = Path(tmp) / "workflow_skills.sqlite"
+            db_path = Path(tmp) / "workflow_tools.sqlite"
             output_dir = Path(tmp) / "runs"
             store = WorkflowSkillStore(db_path)
             store.initialize()

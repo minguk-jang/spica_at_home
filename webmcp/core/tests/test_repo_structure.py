@@ -30,6 +30,7 @@ PROJECT_DOCS = [
     "webmcp/docs/ARCHITECTURE.md",
     "webmcp/docs/DEVELOPMENT.md",
     "webmcp/docs/DESKTOP_APP.md",
+    "webmcp/docs/RUNBOOK.md",
     "webmcp/docs/WORKFLOWS.md",
     "webmcp/docs/plans/2026-06-09-feature-slice-restructure-design.md",
     "webmcp/docs/plans/2026-06-09-feature-slice-restructure.md",
@@ -57,6 +58,7 @@ class WebMcpFeatureSliceStructureTest(unittest.TestCase):
             root / "webmcp" / "docs" / "ARCHITECTURE.md",
             root / "webmcp" / "docs" / "DEVELOPMENT.md",
             root / "webmcp" / "docs" / "DESKTOP_APP.md",
+            root / "webmcp" / "docs" / "RUNBOOK.md",
             root / "webmcp" / "docs" / "WORKFLOWS.md",
         ]
 
@@ -88,6 +90,7 @@ class WebMcpFeatureSliceStructureTest(unittest.TestCase):
             root / "webmcp" / "docs" / "ARCHITECTURE.md",
             root / "webmcp" / "docs" / "DEVELOPMENT.md",
             root / "webmcp" / "docs" / "DESKTOP_APP.md",
+            root / "webmcp" / "docs" / "RUNBOOK.md",
             root / "webmcp" / "docs" / "WORKFLOWS.md",
         ]
 

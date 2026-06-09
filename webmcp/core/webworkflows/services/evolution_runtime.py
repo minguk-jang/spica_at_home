@@ -604,7 +604,7 @@ class WorkflowEvolutionRuntime:
                 select sr.id, sr.step_id, sr.status, sr.duration_ms, sr.evidence_json,
                        sr.error_json, ws.name as step_name, ws.step_type, ws.order_index
                 from step_runs sr
-                join workflow_skill_steps ws on ws.id = sr.step_id
+                join workflow_tool_steps ws on ws.id = sr.step_id
                 where sr.run_id = ?
                 order by ws.order_index, sr.id
                 """,

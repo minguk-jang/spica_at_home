@@ -194,6 +194,110 @@ test("core client creates workflow through Python CLI and emits creation events"
   assert.equal(events[1].type, "creation-finished");
 });
 
+test("core client exports a workflow version as a JavaScript tool", async () => {
+  const calls = [];
+  const client = createWebmcpCoreClient({
+    repoRoot: "/repo/webmcp/core",
+    defaultOutputDir: "/repo/webmcp/core/outputs/desktop_runs",
+    defaultPythonPath: "/repo/webmcp/core/reference/webwright/.venv/bin/python",
+    pythonExists: () => true,
+    collectProcess: async (command, args, options) => {
+      calls.push({ command, args, options });
+      return {
+        stdout: JSON.stringify({
+          status: "succeeded",
+          tool_dir: "/tmp/js-tools/naver-stock-report-v2",
+          files: { entrypoint: "/tmp/js-tools/naver-stock-report-v2/tool.cjs" }
+        }),
+        stderr: "",
+        exitCode: 0
+      };
+    },
+    now: () => "2026-06-09T00:00:00.000Z",
+    nowMs: (() => {
+      let value = 4000;
+      return () => {
+        value += 9;
+        return value;
+      };
+    })()
+  });
+
+  const events = [];
+  const job = await client.exportJsTool({
+    sender: { send: (_channel, event) => events.push(event) },
+    payload: {
+      dbPath: "/tmp/workflows.sqlite",
+      workflowName: "naver_stock_report",
+      version: 2,
+      outputDir: "/tmp/js-tools"
+    }
+  });
+
+  assert.equal(calls[0].command, "/repo/webmcp/core/reference/webwright/.venv/bin/python");
+  assert.deepEqual(calls[0].args.slice(0, 4), ["-m", "webworkflows.cli", "export-js-tool", "--db"]);
+  assert.equal(calls[0].args[calls[0].args.indexOf("--workflow-name") + 1], "naver_stock_report");
+  assert.equal(calls[0].args[calls[0].args.indexOf("--version") + 1], "2");
+  assert.equal(calls[0].options.cwd, "/repo/webmcp/core");
+  assert.equal(job.output.tool_dir, "/tmp/js-tools/naver-stock-report-v2");
+  assert.equal(events[0].type, "js-tool-export-started");
+  assert.equal(events[1].type, "js-tool-export-finished");
+});
+
+test("core client runs and evaluates exported JavaScript tools", async () => {
+  const calls = [];
+  const client = createWebmcpCoreClient({
+    repoRoot: "/repo/webmcp/core",
+    defaultOutputDir: "/repo/webmcp/core/outputs/desktop_runs",
+    defaultPythonPath: "python3",
+    collectProcess: async (command, args, options) => {
+      calls.push({ command, args, options });
+      const commandName = args[2];
+      return {
+        stdout: JSON.stringify(commandName === "eval-js-tool" ? { passed: true } : { status: "succeeded" }),
+        stderr: "",
+        exitCode: 0
+      };
+    },
+    now: () => "2026-06-09T00:00:00.000Z",
+    nowMs: (() => {
+      let value = 5000;
+      return () => {
+        value += 7;
+        return value;
+      };
+    })()
+  });
+
+  const events = [];
+  const runJob = await client.runJsTool({
+    sender: { send: (_channel, event) => events.push(event) },
+    payload: {
+      toolDir: "/tmp/js-tools/naver-stock-report-v2",
+      arguments: { company_name: "삼성전자", ticker: "005930" }
+    }
+  });
+  const evalJob = await client.evalJsTool({
+    sender: { send: (_channel, event) => events.push(event) },
+    payload: {
+      toolDir: "/tmp/js-tools/naver-stock-report-v2",
+      arguments: { company_name: "삼성전자", ticker: "005930" },
+      requiredOutput: ["company_name", "ticker", "report_text"]
+    }
+  });
+
+  assert.equal(calls[0].args[2], "run-js-tool");
+  assert.equal(calls[0].args.includes("company_name=삼성전자"), true);
+  assert.equal(calls[1].args[2], "eval-js-tool");
+  assert.equal(calls[1].args.filter((item) => item === "--required-output").length, 3);
+  assert.equal(runJob.output.status, "succeeded");
+  assert.equal(evalJob.output.passed, true);
+  assert.equal(events[0].type, "js-tool-run-started");
+  assert.equal(events[1].type, "js-tool-run-finished");
+  assert.equal(events[2].type, "js-tool-eval-started");
+  assert.equal(events[3].type, "js-tool-eval-finished");
+});
+
 test("core client pauses and resumes the active job through process controls", () => {
   const calls = [];
   const client = createWebmcpCoreClient({

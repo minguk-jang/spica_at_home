@@ -96,11 +96,18 @@ import {
   type ArgumentExample
 } from "./workflowDashboard";
 import { normalizeWorkflowDetail } from "./workflowDetailDefaults";
+import {
+  coreLogicStages,
+  desktopTabGuides,
+  landingMetricItems,
+  type CoreLogicStage,
+  type LandingMetricItem
+} from "./landingPage";
 import "./styles.css";
 
-type AppView = "workflows" | "memory";
+type AppView = "home" | "workflows" | "jsTool" | "memory";
 type MemoryFilter = "all" | "pages" | "knowledge";
-type TabKey = "steps" | "script" | "versions" | "update" | "updates" | "runs";
+type TabKey = "steps" | "script" | "jsTool" | "versions" | "update" | "updates" | "runs";
 
 const fallbackPaths: DefaultPaths = {
   repoRoot: "../../core",
@@ -111,7 +118,7 @@ const fallbackPaths: DefaultPaths = {
 };
 
 function App(): React.ReactElement {
-  const [appView, setAppView] = useState<AppView>("workflows");
+  const [appView, setAppView] = useState<AppView>("home");
   const [paths, setPaths] = useState<DefaultPaths>(fallbackPaths);
   const [dbPath, setDbPath] = useState(fallbackPaths.dbPath);
   const [repoRoot, setRepoRoot] = useState(fallbackPaths.repoRoot);
@@ -148,6 +155,11 @@ function App(): React.ReactElement {
   const [createFinalState, setCreateFinalState] = useState("Flight results for SEA to JFK are visible with outbound and return dates applied.");
   const [createHeaded, setCreateHeaded] = useState(true);
   const [creationResultEvent, setCreationResultEvent] = useState<RunEvent | null>(null);
+  const [jsToolOutputDir, setJsToolOutputDir] = useState(`${fallbackPaths.outputDir}/js_tools`);
+  const [jsToolDir, setJsToolDir] = useState("");
+  const [jsToolArgumentsJson, setJsToolArgumentsJson] = useState("{}");
+  const [jsToolRequiredOutput, setJsToolRequiredOutput] = useState("");
+  const [jsToolResultEvent, setJsToolResultEvent] = useState<RunEvent | null>(null);
   const [activeJob, setActiveJob] = useState<ActiveJob | null>(null);
 
   const selectedWorkflow = workflows.find((workflow) => workflow.id === selectedId) ?? workflows[0] ?? null;
@@ -196,6 +208,7 @@ function App(): React.ReactElement {
         setDbPath(defaults.dbPath);
         setRepoRoot(defaults.repoRoot);
         setOutputDir(defaults.outputDir);
+        setJsToolOutputDir(`${defaults.outputDir}/js_tools`);
         setPythonPath(defaults.pythonPath);
         setStatus("Ready");
         return defaults.dbPath;
@@ -223,6 +236,16 @@ function App(): React.ReactElement {
     }
     applyWorkflowRunDefaults(detail);
   }, [detail?.workflow.id]);
+
+  useEffect(() => {
+    if (!detail) {
+      return;
+    }
+    setJsToolArgumentsJson(defaultJsToolArgumentsJson(detail));
+    setJsToolRequiredOutput(defaultRequiredOutputKeys(detail, selectedVersion).join("\n"));
+    setJsToolDir("");
+    setJsToolResultEvent(null);
+  }, [detail?.workflow.id, selectedVersion]);
 
   useEffect(() => {
     if (selectedWorkflowId === null || !window.webmcp) {
@@ -584,6 +607,92 @@ function App(): React.ReactElement {
     }
   }
 
+  async function exportSelectedJsTool(): Promise<void> {
+    if (!window.webmcp || !detail || selectedVersion === null) {
+      return;
+    }
+    beginActiveJob({ kind: "jsTool", workflowName: detail.workflow.name, version: selectedVersion });
+    try {
+      const result = await window.webmcp.exportJsTool({
+        dbPath,
+        repoRoot,
+        outputDir: jsToolOutputDir,
+        pythonPath,
+        workflowName: detail.workflow.name,
+        version: selectedVersion
+      });
+      const event = asRunEvent(result, "js-tool-export-finished");
+      setJsToolResultEvent(event);
+      const output = asRecord(event.output);
+      const exportedToolDir = firstStringFromKeys(output, "tool_dir", "toolDir");
+      if (exportedToolDir) {
+        setJsToolDir(exportedToolDir);
+      }
+      setStatus(`JavaScript tool export ${event.status ?? "finished"}`);
+    } catch (error: unknown) {
+      setStatus(webmcpErrorMessage(error));
+    } finally {
+      finishActiveJob();
+    }
+  }
+
+  async function runExportedJsTool(): Promise<void> {
+    if (!window.webmcp || !jsToolDir.trim()) {
+      return;
+    }
+    const parsed = parseJsonObject(jsToolArgumentsJson);
+    if (!parsed.ok) {
+      setStatus(parsed.error);
+      return;
+    }
+    beginActiveJob({ kind: "jsTool", workflowName: detail?.workflow.name, version: selectedVersion ?? undefined });
+    try {
+      const result = await window.webmcp.runJsTool({
+        repoRoot,
+        pythonPath,
+        toolDir: jsToolDir.trim(),
+        arguments: parsed.value
+      });
+      const event = asRunEvent(result, "js-tool-run-finished");
+      setJsToolResultEvent(event);
+      setStatus(`JavaScript tool run ${event.status ?? "finished"}`);
+    } catch (error: unknown) {
+      setStatus(webmcpErrorMessage(error));
+    } finally {
+      finishActiveJob();
+    }
+  }
+
+  async function evalExportedJsTool(): Promise<void> {
+    if (!window.webmcp || !jsToolDir.trim()) {
+      return;
+    }
+    const parsed = parseJsonObject(jsToolArgumentsJson);
+    if (!parsed.ok) {
+      setStatus(parsed.error);
+      return;
+    }
+    beginActiveJob({ kind: "jsTool", workflowName: detail?.workflow.name, version: selectedVersion ?? undefined });
+    try {
+      const result = await window.webmcp.evalJsTool({
+        repoRoot,
+        pythonPath,
+        toolDir: jsToolDir.trim(),
+        arguments: parsed.value,
+        requiredOutput: parseRequiredOutputKeys(jsToolRequiredOutput)
+      });
+      const event = asRunEvent(result, "js-tool-eval-finished");
+      setJsToolResultEvent(event);
+      const output = asRecord(event.output);
+      const passed = output.passed === true ? "passed" : event.status ?? "finished";
+      setStatus(`JavaScript tool eval ${passed}`);
+    } catch (error: unknown) {
+      setStatus(webmcpErrorMessage(error));
+    } finally {
+      finishActiveJob();
+    }
+  }
+
   async function pauseCurrentJob(): Promise<void> {
     if (!window.webmcp) {
       return;
@@ -663,7 +772,21 @@ function App(): React.ReactElement {
         </div>
       </header>
 
-      {appView === "workflows" ? (
+      {appView === "home" ? (
+        <LandingView
+          workflows={workflows}
+          memoryOverview={memoryOverview}
+          onCreate={() => setCreatePanelOpen(true)}
+          onOpenWorkflows={() => setAppView("workflows")}
+          onOpenJsTool={() => setAppView("jsTool")}
+          onOpenMemory={() => {
+            setAppView("memory");
+            if (memoryOverview === null && !memoryLoading) {
+              void refreshMemory();
+            }
+          }}
+        />
+      ) : appView === "workflows" ? (
       <section className="contentGrid">
         <aside className="sidebar" aria-label="Workflow list">
           <div className="sidebarHeader">
@@ -739,6 +862,26 @@ function App(): React.ReactElement {
                   onSelectResource={setSelectedResourceId}
                 />
               ) : null}
+              {tab === "jsTool" ? (
+                <JsToolStudio
+                  detail={detail}
+                  selectedVersion={selectedVersion}
+                  outputDir={jsToolOutputDir}
+                  setOutputDir={setJsToolOutputDir}
+                  toolDir={jsToolDir}
+                  setToolDir={setJsToolDir}
+                  argumentsJson={jsToolArgumentsJson}
+                  setArgumentsJson={setJsToolArgumentsJson}
+                  requiredOutput={jsToolRequiredOutput}
+                  setRequiredOutput={setJsToolRequiredOutput}
+                  latestEvent={jsToolResultEvent}
+                  running={jobActive}
+                  onExport={() => void exportSelectedJsTool()}
+                  onRun={() => void runExportedJsTool()}
+                  onEval={() => void evalExportedJsTool()}
+                  onOpenTarget={(targetPath) => void window.webmcp?.openPath(targetPath)}
+                />
+              ) : null}
               {tab === "versions" ? (
                 <VersionsView
                   versions={detail.versions}
@@ -791,6 +934,30 @@ function App(): React.ReactElement {
           />
         </aside>
       </section>
+      ) : appView === "jsTool" ? (
+        <JsToolAppView
+          workflows={workflows}
+          selectedWorkflow={selectedWorkflow}
+          detail={detail}
+          selectedVersion={selectedVersion}
+          outputDir={jsToolOutputDir}
+          setOutputDir={setJsToolOutputDir}
+          toolDir={jsToolDir}
+          setToolDir={setJsToolDir}
+          argumentsJson={jsToolArgumentsJson}
+          setArgumentsJson={setJsToolArgumentsJson}
+          requiredOutput={jsToolRequiredOutput}
+          setRequiredOutput={setJsToolRequiredOutput}
+          latestEvent={jsToolResultEvent}
+          running={jobActive}
+          events={events}
+          onSelectWorkflow={setSelectedId}
+          onCreate={() => setCreatePanelOpen(true)}
+          onExport={() => void exportSelectedJsTool()}
+          onRun={() => void runExportedJsTool()}
+          onEval={() => void evalExportedJsTool()}
+          onOpenTarget={(targetPath) => void window.webmcp?.openPath(targetPath)}
+        />
       ) : (
         <MemoryView
           overview={memoryOverview}
@@ -847,8 +1014,10 @@ function AppNav({
   onSelect: (view: AppView) => void;
 }): React.ReactElement {
   const items: Array<{ key: AppView; label: string; icon: React.ReactNode }> = [
-    { key: "workflows", label: "Workflows", icon: <Workflow size={17} aria-hidden="true" /> },
-    { key: "memory", label: "Memory", icon: <Brain size={17} aria-hidden="true" /> }
+    { key: "home", label: "홈", icon: <Gauge size={17} aria-hidden="true" /> },
+    { key: "workflows", label: "워크플로우", icon: <Workflow size={17} aria-hidden="true" /> },
+    { key: "jsTool", label: "JS 도구", icon: <Terminal size={17} aria-hidden="true" /> },
+    { key: "memory", label: "메모리", icon: <Brain size={17} aria-hidden="true" /> }
   ];
   return (
     <nav className="appNav" aria-label="App sections">
@@ -868,6 +1037,259 @@ function AppNav({
       ))}
     </nav>
   );
+}
+
+function JsToolAppView(props: {
+  workflows: WorkflowCard[];
+  selectedWorkflow: WorkflowCard | null;
+  detail: WorkflowDetail | null;
+  selectedVersion: number | null;
+  outputDir: string;
+  setOutputDir: (value: string) => void;
+  toolDir: string;
+  setToolDir: (value: string) => void;
+  argumentsJson: string;
+  setArgumentsJson: (value: string) => void;
+  requiredOutput: string;
+  setRequiredOutput: (value: string) => void;
+  latestEvent: RunEvent | null;
+  running: boolean;
+  events: RunEvent[];
+  onSelectWorkflow: (workflowId: number) => void;
+  onCreate: () => void;
+  onExport: () => void;
+  onRun: () => void;
+  onEval: () => void;
+  onOpenTarget: (path: string) => void;
+}): React.ReactElement {
+  return (
+    <section className="contentGrid jsToolAppShell">
+      <aside className="sidebar" aria-label="Workflow list for JavaScript tools">
+        <div className="sidebarHeader">
+          <span>Tool List</span>
+          <span className="sidebarHeaderActions">
+            <strong>{props.workflows.length}</strong>
+            <IconButton
+              label="Create workflow"
+              title="Create workflow"
+              onClick={props.onCreate}
+              disabled={props.running}
+              variant="plain"
+            >
+              <Plus size={16} aria-hidden="true" />
+            </IconButton>
+          </span>
+        </div>
+        <div className="workflowList">
+          {props.workflows.map((workflow) => (
+            <WorkflowCardButton
+              key={workflow.id}
+              workflow={workflow}
+              selected={workflow.id === props.selectedWorkflow?.id}
+              onClick={() => props.onSelectWorkflow(workflow.id)}
+            />
+          ))}
+          {props.workflows.length === 0 ? <div className="emptyState">No workflows found</div> : null}
+        </div>
+      </aside>
+
+      <section className="detailPane">
+        {!props.detail ? (
+          <div className="emptyState large">Select a WebMCP workflow to export as a JavaScript tool</div>
+        ) : (
+          <>
+            <DetailHeader detail={props.detail} />
+            <JsToolStudio
+              detail={props.detail}
+              selectedVersion={props.selectedVersion}
+              outputDir={props.outputDir}
+              setOutputDir={props.setOutputDir}
+              toolDir={props.toolDir}
+              setToolDir={props.setToolDir}
+              argumentsJson={props.argumentsJson}
+              setArgumentsJson={props.setArgumentsJson}
+              requiredOutput={props.requiredOutput}
+              setRequiredOutput={props.setRequiredOutput}
+              latestEvent={props.latestEvent}
+              running={props.running}
+              onExport={props.onExport}
+              onRun={props.onRun}
+              onEval={props.onEval}
+              onOpenTarget={props.onOpenTarget}
+            />
+          </>
+        )}
+      </section>
+
+      <aside className="queuePane" aria-label="JavaScript tool queue">
+        <div className="sidebarHeader">
+          <span>Run Queue</span>
+          <strong>{props.events.length}</strong>
+        </div>
+        <RunEvents events={props.events} onOpenTarget={props.onOpenTarget} />
+      </aside>
+    </section>
+  );
+}
+
+function LandingView({
+  workflows,
+  memoryOverview,
+  onCreate,
+  onOpenWorkflows,
+  onOpenJsTool,
+  onOpenMemory
+}: {
+  workflows: WorkflowCard[];
+  memoryOverview: MemoryOverview | null;
+  onCreate: () => void;
+  onOpenWorkflows: () => void;
+  onOpenJsTool: () => void;
+  onOpenMemory: () => void;
+}): React.ReactElement {
+  return (
+    <section className="landingShell" aria-label="WebMCP Desktop 개요">
+      <header className="landingHero">
+        <div className="landingHeroCopy">
+          <p className="eyebrow">개요</p>
+          <h2>브라우저 요청에서 재사용 가능한 워크플로우까지</h2>
+          <p>
+            WebMCP Desktop은 사람이 원하는 브라우저 작업을 저장 가능한 워크플로우로 만들고,
+            실제 브라우저 증거로 실행과 평가를 마친 뒤 다음 생성을 위한 페이지 지식을 남깁니다.
+          </p>
+          <div className="landingActions">
+            <button className="primaryButton" type="button" onClick={onCreate}>
+              <Plus size={16} aria-hidden="true" />
+              워크플로우 생성
+            </button>
+            <button className="secondaryButton" type="button" onClick={onOpenWorkflows}>
+              <Workflow size={16} aria-hidden="true" />
+              워크플로우 열기
+            </button>
+            <button className="secondaryButton" type="button" onClick={onOpenJsTool}>
+              <Terminal size={16} aria-hidden="true" />
+              JS 도구
+            </button>
+            <button className="secondaryButton" type="button" onClick={onOpenMemory}>
+              <Brain size={16} aria-hidden="true" />
+              메모리 열기
+            </button>
+          </div>
+        </div>
+        <div className="landingMetricGrid" aria-label="스튜디오 상태">
+          {landingMetricItems.map((item) => (
+            <LandingMetricCard key={item.id} item={item} workflows={workflows} memoryOverview={memoryOverview} />
+          ))}
+        </div>
+      </header>
+
+      <section className="landingSection" aria-labelledby="core-flow-title">
+        <div className="landingSectionHeader">
+          <SectionTitle icon={<Route size={17} />} title="코어 로직" />
+          <h3 id="core-flow-title">생성, 실행, 평가, 메모리가 하나의 루프로 이어집니다.</h3>
+        </div>
+        <div className="logicDiagram" aria-label="코어 로직 다이어그램">
+          {coreLogicStages.map((stage, index) => (
+            <article className={`logicNode ${stage.accent}`} key={stage.id}>
+              <div className="logicNodeTop">
+                <span className={`logicIcon ${stage.accent}`}>{landingStageIcon(stage.id)}</span>
+                <span className="logicStep">{String(index + 1).padStart(2, "0")}</span>
+              </div>
+              <h4>{stage.title}</h4>
+              <p>{stage.summary}</p>
+              <small>{stage.detail}</small>
+            </article>
+          ))}
+        </div>
+      </section>
+
+      <section className="landingSection" aria-labelledby="tab-guide-title">
+        <div className="landingSectionHeader">
+          <SectionTitle icon={<ListChecks size={17} />} title="데스크톱 탭" />
+          <h3 id="tab-guide-title">각 탭은 워크플로우 생명주기의 서로 다른 작업을 맡습니다.</h3>
+        </div>
+        <div className="tabGuideGrid">
+          {desktopTabGuides.map((guide) => (
+            <article className="tabGuideCard" key={guide.title}>
+              <h4>{guide.title}</h4>
+              <p>{guide.role}</p>
+              <span>{guide.usage}</span>
+            </article>
+          ))}
+        </div>
+      </section>
+    </section>
+  );
+}
+
+function LandingMetricCard({
+  item,
+  workflows,
+  memoryOverview
+}: {
+  item: LandingMetricItem;
+  workflows: WorkflowCard[];
+  memoryOverview: MemoryOverview | null;
+}): React.ReactElement {
+  return (
+    <article className="landingMetric">
+      <div className="landingMetricHeader">
+        <span className="landingMetricIcon">{landingMetricIcon(item.id)}</span>
+        <span>{item.label}</span>
+      </div>
+      <strong>{landingMetricValue(item, workflows, memoryOverview)}</strong>
+      <p>{item.description}</p>
+    </article>
+  );
+}
+
+function landingMetricValue(
+  item: LandingMetricItem,
+  workflows: WorkflowCard[],
+  memoryOverview: MemoryOverview | null
+): string {
+  if (item.id === "workflows") {
+    return String(workflows.length);
+  }
+  if (item.id === "pageMemory") {
+    return String(memoryOverview?.pageAnalysisCount ?? 0);
+  }
+  if (item.id === "knowledge") {
+    return String(memoryOverview?.knowledgeEntryCount ?? 0);
+  }
+  return "Codex VLM";
+}
+
+function landingStageIcon(id: CoreLogicStage["id"]): React.ReactNode {
+  switch (id) {
+    case "request":
+      return <Eye size={16} aria-hidden="true" />;
+    case "create":
+      return <Sparkles size={16} aria-hidden="true" />;
+    case "store":
+      return <Database size={16} aria-hidden="true" />;
+    case "run":
+      return <Play size={16} aria-hidden="true" />;
+    case "jsTool":
+      return <Terminal size={16} aria-hidden="true" />;
+    case "evaluate":
+      return <ShieldCheck size={16} aria-hidden="true" />;
+    case "memory":
+      return <Brain size={16} aria-hidden="true" />;
+  }
+}
+
+function landingMetricIcon(id: LandingMetricItem["id"]): React.ReactNode {
+  switch (id) {
+    case "workflows":
+      return <Workflow size={16} aria-hidden="true" />;
+    case "pageMemory":
+      return <Eye size={16} aria-hidden="true" />;
+    case "knowledge":
+      return <Lightbulb size={16} aria-hidden="true" />;
+    case "evaluator":
+      return <ShieldCheck size={16} aria-hidden="true" />;
+  }
 }
 
 function MemoryView(props: {
@@ -1512,6 +1934,7 @@ function Tabs({ active, onSelect }: { active: TabKey; onSelect: (tab: TabKey) =>
   const tabs: Array<{ key: TabKey; label: string; icon: React.ReactNode }> = [
     { key: "steps", label: "Steps", icon: <ListChecks size={16} /> },
     { key: "script", label: "Implementation", icon: <ScrollText size={16} /> },
+    { key: "jsTool", label: "JS Tool", icon: <Terminal size={16} /> },
     { key: "versions", label: "Versions", icon: <History size={16} /> },
     { key: "update", label: "Update", icon: <Bot size={16} /> },
     { key: "updates", label: "Updates", icon: <Route size={16} /> },
@@ -1717,6 +2140,190 @@ function ScriptView(props: {
             </pre>
           </div>
         </div>
+      </div>
+    </section>
+  );
+}
+
+function JsToolStudio(props: {
+  detail: WorkflowDetail;
+  selectedVersion: number | null;
+  outputDir: string;
+  setOutputDir: (value: string) => void;
+  toolDir: string;
+  setToolDir: (value: string) => void;
+  argumentsJson: string;
+  setArgumentsJson: (value: string) => void;
+  requiredOutput: string;
+  setRequiredOutput: (value: string) => void;
+  latestEvent: RunEvent | null;
+  running: boolean;
+  onExport: () => void;
+  onRun: () => void;
+  onEval: () => void;
+  onOpenTarget: (path: string) => void;
+}): React.ReactElement {
+  const selectedVersion = props.detail.versions.find((version) => version.version === props.selectedVersion) ?? props.detail.versions[0] ?? null;
+  const requiredOutputKeys = parseRequiredOutputKeys(props.requiredOutput);
+  const lastOutput = asRecord(props.latestEvent?.output);
+  const exportedFiles = asRecord(lastOutput.files);
+  const artifactEntries = Object.entries(exportedFiles).filter((entry): entry is [string, string] => typeof entry[1] === "string");
+  const evalPassed = lastOutput.passed === true;
+  const resultStatus = props.latestEvent
+    ? evalPassed
+      ? "passed"
+      : props.latestEvent.status ?? String(lastOutput.status ?? "finished")
+    : "";
+  const canUseExportedTool = props.toolDir.trim() !== "";
+  return (
+    <section className="tabPanel jsToolStudio">
+      <div className="jsToolHero">
+        <div>
+          <SectionTitle icon={<Terminal size={17} />} title="JavaScript Tool Lab" />
+          <h3>도구를 JavaScript로 변환하고 테스트</h3>
+          <p>
+            선택한 workflow 버전을 `manifest.json`, `workflow.json`, `tool.cjs`로 export하고
+            동일한 arguments로 run/eval contract를 확인합니다.
+          </p>
+        </div>
+        <span className="metaRow">
+          <Badge>{props.detail.workflow.name}</Badge>
+          <Badge>{selectedVersion ? `v${selectedVersion.version}` : "version -"}</Badge>
+          <Badge>webmcp-js-tool-v1</Badge>
+          <Badge>{requiredOutputKeys.length} required output</Badge>
+        </span>
+      </div>
+
+      <div className="jsToolGrid">
+        <section className="jsToolPanel">
+          <SectionTitle icon={<FileText size={17} />} title="Export" />
+          <TextField label="Output directory" value={props.outputDir} onChange={props.setOutputDir} />
+          <div className="jsToolActionRow">
+            <button
+              className="primaryButton jsToolActionButton"
+              type="button"
+              aria-label="Export JS tool"
+              title="Export JS tool"
+              disabled={props.running || props.selectedVersion === null || props.outputDir.trim() === ""}
+              onClick={props.onExport}
+            >
+              <FileText size={16} aria-hidden="true" />
+              <span>Export</span>
+            </button>
+          </div>
+          <div className="jsToolFacts">
+            <SummaryItem label="Input" value="Studio DB workflow version" />
+            <SummaryItem label="Files" value="manifest, workflow, tool.cjs" />
+            <SummaryItem label="Runtime" value="Node.js CommonJS" />
+          </div>
+        </section>
+
+        <section className="jsToolPanel">
+          <SectionTitle icon={<Play size={17} />} title="Run / Eval" />
+          <TextField label="Exported tool directory" value={props.toolDir} onChange={props.setToolDir} />
+          <label className="textAreaField">
+            <span>Arguments JSON</span>
+            <textarea
+              value={props.argumentsJson}
+              rows={8}
+              spellCheck={false}
+              onChange={(event) => props.setArgumentsJson(event.target.value)}
+            />
+          </label>
+          <label className="textAreaField">
+            <span>required output keys</span>
+            <textarea
+              value={props.requiredOutput}
+              rows={3}
+              spellCheck={false}
+              onChange={(event) => props.setRequiredOutput(event.target.value)}
+            />
+          </label>
+          <div className="jsToolActionRow">
+            <button
+              className="secondaryButton emphasized jsToolActionButton"
+              type="button"
+              aria-label="Run JS tool"
+              title="Run JS tool"
+              disabled={props.running || !canUseExportedTool}
+              onClick={props.onRun}
+            >
+              <Play size={16} aria-hidden="true" />
+              <span>Run</span>
+            </button>
+            <button
+              className="secondaryButton jsToolActionButton"
+              type="button"
+              aria-label="Eval JS tool"
+              title="Eval JS tool"
+              disabled={props.running || !canUseExportedTool}
+              onClick={props.onEval}
+            >
+              <ShieldCheck size={16} aria-hidden="true" />
+              <span>Eval</span>
+            </button>
+          </div>
+        </section>
+      </div>
+
+      <div className="jsToolGrid">
+        <section className="jsToolPanel">
+          <SectionTitle icon={<ListChecks size={17} />} title="Contract" />
+          <div className="jsToolFacts">
+            <SummaryItem label="Step support" value="deterministic steps" />
+            <SummaryItem label="Browser/VLM" value="Python eval-and-evolve" />
+            <SummaryItem label="Output keys" value={requiredOutputKeys.length === 0 ? "-" : requiredOutputKeys.join(", ")} />
+          </div>
+          <div className="scriptCodeGrid compact">
+            <div>
+              <h4>Input schema</h4>
+              <JsonBlock value={selectedVersion?.inputSchema ?? {}} compact />
+            </div>
+            <div>
+              <h4>Output schema</h4>
+              <JsonBlock value={selectedVersion?.outputSchema ?? {}} compact />
+            </div>
+            <div>
+              <h4>Latest output</h4>
+              <JsonBlock value={props.latestEvent?.output ?? {}} compact />
+            </div>
+          </div>
+        </section>
+
+        <section className="jsToolPanel">
+          <SectionTitle icon={<Activity size={17} />} title="Result" />
+          {props.latestEvent ? (
+            <div className="jsToolResult">
+              <div className="resultPanelHeader">
+                <div>
+                  <h4>{props.latestEvent.type.replaceAll("-", " ")}</h4>
+                  <span className="metaRow">
+                    <StatusPill status={resultStatus} />
+                    <Badge>{duration(props.latestEvent.durationMs ?? null)}</Badge>
+                  </span>
+                </div>
+                <div className="resultActions">
+                  {artifactEntries.map(([label, targetPath]) => (
+                    <button
+                      key={`${label}-${targetPath}`}
+                      className="linkButton"
+                      type="button"
+                      aria-label={`Open ${label}`}
+                      title={`Open ${label}`}
+                      onClick={() => props.onOpenTarget(targetPath)}
+                    >
+                      <ExternalLink size={14} aria-hidden="true" />
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <JsonBlock value={props.latestEvent.output} />
+              {props.latestEvent.stderr ? <pre className="stderr">{props.latestEvent.stderr}</pre> : null}
+            </div>
+          ) : (
+            <div className="emptyState">아직 JavaScript tool 작업 결과가 없습니다.</div>
+          )}
+        </section>
       </div>
     </section>
   );
@@ -2338,6 +2945,9 @@ function RunEvents({
             {event.type.startsWith("creation") && event.type.endsWith("finished") && event.output ? (
               <JsonBlock value={event.output} compact />
             ) : null}
+            {event.type.startsWith("js-tool") && event.type.endsWith("finished") && event.output ? (
+              <JsonBlock value={event.output} compact />
+            ) : null}
             {event.stderr ? <pre className="stderr">{event.stderr}</pre> : null}
           </div>
         </article>
@@ -2475,6 +3085,72 @@ function CheckboxField(props: {
       />
       <span>{props.label}</span>
     </label>
+  );
+}
+
+function defaultJsToolArgumentsJson(detail: WorkflowDetail): string {
+  const values: Record<string, unknown> = {};
+  for (const argument of [...detail.arguments].sort((left, right) => left.orderIndex - right.orderIndex)) {
+    const value = defaultRunValue(argument);
+    if (value !== undefined) {
+      values[argument.name] = value;
+      continue;
+    }
+    if (argument.required) {
+      values[argument.name] = sampleValueForArgument(argument);
+    }
+  }
+  return JSON.stringify(values, null, 2);
+}
+
+function defaultRequiredOutputKeys(detail: WorkflowDetail, selectedVersion: number | null): string[] {
+  const version = detail.versions.find((candidate) => candidate.version === selectedVersion) ?? detail.versions[0] ?? null;
+  return version ? schemaKeys(version.outputSchema) : [];
+}
+
+function schemaKeys(schema: unknown): string[] {
+  const record = asRecord(schema);
+  const properties = asRecord(record.properties);
+  const directKeys = Object.keys(record).filter((key) => !["type", "properties", "required"].includes(key));
+  return uniqueStrings([
+    ...toStringList(record.required),
+    ...Object.keys(properties),
+    ...directKeys
+  ]);
+}
+
+function sampleValueForArgument(argument: WorkflowArgument): unknown {
+  const valueType = argument.valueType.toLowerCase();
+  if (valueType.includes("number") || valueType.includes("integer")) {
+    return 0;
+  }
+  if (valueType.includes("boolean")) {
+    return false;
+  }
+  if (argument.name === "page_text") {
+    return "";
+  }
+  return "";
+}
+
+function parseJsonObject(source: string): { ok: true; value: Record<string, unknown> } | { ok: false; error: string } {
+  try {
+    const parsed = JSON.parse(source);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      return { ok: false, error: "Arguments JSON must be an object." };
+    }
+    return { ok: true, value: parsed as Record<string, unknown> };
+  } catch (error: unknown) {
+    return { ok: false, error: `Invalid arguments JSON: ${errorMessage(error)}` };
+  }
+}
+
+function parseRequiredOutputKeys(source: string): string[] {
+  return uniqueStrings(
+    source
+      .split(/[\n,]/)
+      .map((item) => item.trim())
+      .filter(Boolean)
   );
 }
 
@@ -2743,6 +3419,9 @@ function eventLabel(event: RunEvent): string {
   if (event.type.startsWith("creation")) {
     return `workflow creation ${event.type.endsWith("finished") ? "finished" : "started"}`;
   }
+  if (event.type.startsWith("js-tool")) {
+    return `JavaScript tool ${event.type.endsWith("finished") ? "finished" : "started"}`;
+  }
   if (event.type.startsWith("update-apply")) {
     return `proposal #${event.proposalId ?? "-"} apply ${event.type.endsWith("finished") ? "finished" : "started"}`;
   }
@@ -2786,6 +3465,15 @@ function webmcpErrorMessage(error: unknown): string {
     return "Electron main process is stale. Stop the app and run npm run dev again.";
   }
   if (message.includes("No handler registered for 'webmcp:create-workflow'")) {
+    return "Electron main process is stale. Stop the app and run npm run dev again.";
+  }
+  if (message.includes("No handler registered for 'webmcp:export-js-tool'")) {
+    return "Electron main process is stale. Stop the app and run npm run dev again.";
+  }
+  if (message.includes("No handler registered for 'webmcp:run-js-tool'")) {
+    return "Electron main process is stale. Stop the app and run npm run dev again.";
+  }
+  if (message.includes("No handler registered for 'webmcp:eval-js-tool'")) {
     return "Electron main process is stale. Stop the app and run npm run dev again.";
   }
   return message;

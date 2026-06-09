@@ -49,7 +49,7 @@ python3 -m unittest tests/test_workflow_runtime_service.py
 
 ```bash
 cd webmcp/core
-python3 -m unittest tests/test_workflow_runtime_service.py tests/test_workflow_skills.py
+python3 -m unittest tests/test_workflow_runtime_service.py tests/test_workflow_tools.py
 ```
 
 ### Task 2: Synthesis provider port
@@ -85,7 +85,7 @@ provider 선택 로직을 `create_synthesis_backend()` 뒤로 옮긴다. 기존
 
 ```bash
 cd webmcp/core
-python3 -m unittest tests/test_synthesis_provider_port.py tests/test_workflow_skills.py tests/test_text_default_vision_fallback.py
+python3 -m unittest tests/test_synthesis_provider_port.py tests/test_workflow_tools.py tests/test_text_default_vision_fallback.py
 ```
 
 ### Task 3: Core update service
@@ -121,7 +121,7 @@ payload를 그대로 JSON으로 출력한다.
 
 ```bash
 cd webmcp/core
-python3 -m unittest tests/test_workflow_update_runtime_service.py tests/test_workflow_runtime_service.py tests/test_synthesis_provider_port.py tests/test_workflow_skills.py tests/test_text_default_vision_fallback.py
+python3 -m unittest tests/test_workflow_update_runtime_service.py tests/test_workflow_runtime_service.py tests/test_synthesis_provider_port.py tests/test_workflow_tools.py tests/test_text_default_vision_fallback.py
 ```
 
 ### Task 4: Desktop core client
@@ -214,7 +214,7 @@ Core use case가 service 뒤에 있고, Desktop이 adapter module을 통해 Core
 
 ```bash
 cd webmcp/core
-python3 -m unittest tests/test_repo_structure.py tests/test_workflow_runtime_service.py tests/test_workflow_update_runtime_service.py tests/test_synthesis_provider_port.py tests/test_workflow_skills.py tests/test_text_default_vision_fallback.py
+python3 -m unittest tests/test_repo_structure.py tests/test_workflow_runtime_service.py tests/test_workflow_update_runtime_service.py tests/test_synthesis_provider_port.py tests/test_workflow_tools.py tests/test_text_default_vision_fallback.py
 
 cd ../apps/desktop
 npm run test:unit
