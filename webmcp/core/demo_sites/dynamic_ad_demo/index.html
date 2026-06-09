@@ -1,0 +1,280 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Dynamic Ad Demo</title>
+    <style>
+      :root {
+        color-scheme: light;
+        font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        color: #18212f;
+        background: #f4f7fb;
+      }
+
+      body {
+        margin: 0;
+      }
+
+      main {
+        max-width: 880px;
+        margin: 0 auto;
+        padding: 48px 24px 96px;
+      }
+
+      h1 {
+        margin: 0 0 16px;
+        font-size: 32px;
+        letter-spacing: 0;
+      }
+
+      .content {
+        border: 1px solid #cad4e1;
+        border-radius: 8px;
+        background: #ffffff;
+        padding: 24px;
+      }
+
+      #status {
+        margin-top: 20px;
+        font-weight: 700;
+        color: #8a3b12;
+      }
+
+      .review-actions {
+        margin-top: 22px;
+      }
+
+      .primary-action,
+      .complete-action {
+        min-height: 38px;
+        border: 0;
+        border-radius: 6px;
+        padding: 0 16px;
+        color: #ffffff;
+        background: #2457c5;
+        font-weight: 700;
+        cursor: pointer;
+      }
+
+      .primary-action:disabled,
+      .complete-action:disabled {
+        cursor: not-allowed;
+        background: #97a4b8;
+      }
+
+      .review-panel {
+        margin-top: 24px;
+        border: 1px solid #cad4e1;
+        border-radius: 8px;
+        padding: 20px;
+        background: #f9fbff;
+      }
+
+      .review-panel[hidden] {
+        display: none;
+      }
+
+      label {
+        display: block;
+        margin-top: 14px;
+        font-weight: 700;
+      }
+
+      input[type="text"] {
+        display: block;
+        width: min(420px, 100%);
+        min-height: 36px;
+        margin-top: 6px;
+        border: 1px solid #b6c2d2;
+        border-radius: 6px;
+        padding: 0 10px;
+        font: inherit;
+      }
+
+      .check-row {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin-top: 14px;
+      }
+
+      .check-row label {
+        margin: 0;
+        font-weight: 600;
+      }
+
+      #completion {
+        margin-top: 18px;
+        color: #17653a;
+        font-weight: 800;
+      }
+
+      .ad-shell {
+        position: fixed;
+        z-index: 20;
+        background: #172033;
+        color: #ffffff;
+        box-shadow: 0 18px 60px rgba(12, 19, 31, 0.28);
+      }
+
+      .ad-shell.modal {
+        inset: 20% auto auto 50%;
+        width: min(420px, calc(100vw - 32px));
+        transform: translateX(-50%);
+        border-radius: 8px;
+        padding: 24px;
+      }
+
+      .ad-shell.banner {
+        inset: auto 0 0 0;
+        padding: 18px 24px;
+      }
+
+      .ad-shell.rail {
+        right: 18px;
+        top: 112px;
+        width: 280px;
+        border-radius: 8px;
+        padding: 20px;
+      }
+
+      .ad-title {
+        margin: 0 0 8px;
+        font-size: 18px;
+        font-weight: 700;
+      }
+
+      .ad-copy {
+        margin: 0 0 16px;
+        color: #dbe7ff;
+      }
+
+      .ad-close {
+        min-height: 36px;
+        border: 0;
+        border-radius: 6px;
+        padding: 0 14px;
+        color: #172033;
+        background: #f7d66d;
+        font-weight: 700;
+        cursor: pointer;
+      }
+    </style>
+  </head>
+  <body data-ad-state="visible">
+    <main>
+      <h1>Quarterly Launch Checklist</h1>
+      <section class="content" aria-label="Primary article">
+        <p>
+          The campaign checklist is ready for review. The reusable workflow should dismiss the changing sponsored
+          placement and leave this article visible.
+        </p>
+        <ul>
+          <li>Confirm the article remains visible.</li>
+          <li>Dismiss the current sponsored placement.</li>
+          <li>Complete the launch review form after the ad is gone.</li>
+        </ul>
+        <div id="status">Ad visible</div>
+        <div class="review-actions">
+          <button id="begin-review" class="primary-action" type="button" disabled>Begin launch review</button>
+        </div>
+        <form id="review-panel" class="review-panel" hidden>
+          <p><strong>Launch review</strong></p>
+          <label for="reviewer-name">Reviewer name</label>
+          <input id="reviewer-name" name="reviewer_name" type="text" autocomplete="off" />
+          <div class="check-row">
+            <input id="copy-approved" name="copy_approved" type="checkbox" />
+            <label for="copy-approved">Copy approved</label>
+          </div>
+          <div class="check-row">
+            <input id="budget-approved" name="budget_approved" type="checkbox" />
+            <label for="budget-approved">Budget approved</label>
+          </div>
+          <button id="complete-review" class="complete-action" type="button">Complete review</button>
+        </form>
+        <div id="completion" aria-live="polite"></div>
+      </section>
+    </main>
+    <div id="ad-root"></div>
+    <script>
+      const variants = [
+        {
+          shell: "modal",
+          title: "Sponsored popup",
+          copy: "A centered sponsored message blocks part of the checklist.",
+          label: "Close sponsored card",
+          testId: "sponsor-close",
+        },
+        {
+          shell: "banner",
+          title: "Promotional banner",
+          copy: "A sticky promotion covers the bottom action area.",
+          label: "Dismiss promo",
+          aria: "Dismiss promotional banner",
+        },
+        {
+          shell: "rail",
+          title: "Ad panel",
+          copy: "A side placement changes position and button copy.",
+          label: "No thanks",
+          className: "side-placement-dismiss",
+        },
+      ];
+
+      const params = new URLSearchParams(window.location.search);
+      const selected = params.get("variant");
+      const variant =
+        variants.find((item) => item.shell === selected) ||
+        variants[Math.floor((Date.now() / 1000) % variants.length)];
+
+      const shell = document.createElement("aside");
+      shell.className = `ad-shell ${variant.shell}`;
+      shell.setAttribute("aria-label", variant.title);
+
+      const title = document.createElement("p");
+      title.className = "ad-title";
+      title.textContent = variant.title;
+      shell.appendChild(title);
+
+      const copy = document.createElement("p");
+      copy.className = "ad-copy";
+      copy.textContent = variant.copy;
+      shell.appendChild(copy);
+
+      const close = document.createElement("button");
+      close.type = "button";
+      close.className = `ad-close ${variant.className || ""}`.trim();
+      close.textContent = variant.label;
+      if (variant.testId) close.setAttribute("data-testid", variant.testId);
+      if (variant.aria) close.setAttribute("aria-label", variant.aria);
+      close.addEventListener("click", () => {
+        shell.remove();
+        document.body.dataset.adState = "dismissed";
+        document.querySelector("#status").textContent = "Ad dismissed";
+        document.querySelector("#begin-review").disabled = false;
+      });
+      shell.appendChild(close);
+
+      document.querySelector("#ad-root").appendChild(shell);
+
+      document.querySelector("#begin-review").addEventListener("click", () => {
+        document.querySelector("#review-panel").hidden = false;
+        document.querySelector("#status").textContent = "Review in progress";
+      });
+
+      document.querySelector("#complete-review").addEventListener("click", () => {
+        const reviewer = document.querySelector("#reviewer-name").value.trim();
+        const copyApproved = document.querySelector("#copy-approved").checked;
+        const budgetApproved = document.querySelector("#budget-approved").checked;
+        if (!reviewer || !copyApproved || !budgetApproved) {
+          document.querySelector("#completion").textContent = "Review incomplete";
+          return;
+        }
+        document.body.dataset.reviewState = "complete";
+        document.querySelector("#status").textContent = "Launch review complete";
+        document.querySelector("#completion").textContent = `Launch review complete for ${reviewer}`;
+      });
+    </script>
+  </body>
+</html>

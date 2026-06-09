@@ -73,12 +73,12 @@ index 0000000..f788092
 +# Stack on top of base.yaml:
 +#   python -m webwright.run.cli main -c base.yaml -c model_codex_oauth_text_vision.yaml ...
 +#
-+# The default agent uses gpt-5.3-codex-spark. Screenshot-oriented tools use the
++# The default agent uses gpt-5.5. Screenshot-oriented tools use the
 +# vision_model block when present.
 +
 +model:
 +  model_class: codex_cli
-+  model_name: gpt-5.3-codex-spark
++  model_name: gpt-5.5
 +  codex_sandbox: workspace-write
 +  request_timeout_seconds: 300
 +  attach_observation_screenshot: false
@@ -109,7 +109,7 @@ index 0000000..daf46fb
 +
 +model:
 +  model_class: openai
-+  model_name: gpt-5.3-codex-spark
++  model_name: gpt-5.5
 +  openai_endpoint: https://api.openai.com/v1/responses
 +  openai_api_key: ""
 +  attach_observation_screenshot: false
@@ -137,7 +137,7 @@ index 0000000..7aa642b
 +
 +model:
 +  model_class: codex_cli
-+  model_name: gpt-5.3-codex-spark
++  model_name: gpt-5.5
 +  codex_sandbox: workspace-write
 +  request_timeout_seconds: 300
 +  attach_observation_screenshot: false
@@ -189,7 +189,7 @@ index 0000000..63eec60
 +
 +
 +class CodexCliModelConfig(BaseModelConfig):
-+    model_name: OptStr = "gpt-5.3-codex-spark"
++    model_name: OptStr = "gpt-5.5"
 +    codex_bin: OptStr = "codex"
 +    codex_sandbox: OptStr = "read-only"
 +    codex_workdir: OptStr = ""
@@ -421,7 +421,7 @@ index cf2c1ee..f1ac08a 100644
 +    config = get_config_from_spec("model_codex_oauth_text_vision.yaml")
 +
 +    assert config["model"]["model_class"] == "codex_cli"
-+    assert config["model"]["model_name"] == "gpt-5.3-codex-spark"
++    assert config["model"]["model_name"] == "gpt-5.5"
 +    assert config["vision_model"]["model_class"] == "codex_cli"
 +    assert config["vision_model"]["model_name"] == "gpt-5.5"
 +
@@ -443,7 +443,7 @@ index cf2c1ee..f1ac08a 100644
  
 +def test_extract_model_block_prefers_vision_model_when_present() -> None:
 +    config = {
-+        "model": {"model_class": "openai", "model_name": "gpt-5.3-codex-spark"},
++        "model": {"model_class": "openai", "model_name": "gpt-5.5"},
 +        "vision_model": {"model_class": "openai", "model_name": "gpt-5.5"},
 +    }
 +

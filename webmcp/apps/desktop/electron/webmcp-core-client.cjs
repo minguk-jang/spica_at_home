@@ -1,12 +1,23 @@
 const fs = require("fs");
-const { buildPythonProposeArgs, buildPythonRunArgs } = require("./update-command.cjs");
-const { collectProcess: defaultCollectProcess } = require("./process-runner.cjs");
+const {
+  buildPythonCreateWorkflowArgs,
+  buildPythonEvolveArgs,
+  buildPythonProposeArgs,
+  buildPythonRunArgs
+} = require("./update-command.cjs");
+const {
+  collectProcess: defaultCollectProcess,
+  pauseCurrentProcess: defaultPauseCurrentProcess,
+  resumeCurrentProcess: defaultResumeCurrentProcess
+} = require("./process-runner.cjs");
 
 function createWebmcpCoreClient(options) {
   const repoRoot = options.repoRoot;
   const defaultOutputDir = options.defaultOutputDir;
   const defaultPythonPath = options.defaultPythonPath;
   const collectProcess = options.collectProcess || defaultCollectProcess;
+  const pauseProcess = options.pauseProcess || defaultPauseCurrentProcess;
+  const resumeProcess = options.resumeProcess || defaultResumeCurrentProcess;
   const pythonExists = options.pythonExists || ((pythonPath) => fs.existsSync(pythonPath));
   const openExternal = options.openExternal || (async () => undefined);
   const now = options.now || (() => new Date().toISOString());
@@ -119,6 +130,57 @@ function createWebmcpCoreClient(options) {
     return job;
   }
 
+  async function evolveWorkflow({ sender, payload }) {
+    const jobId = nextJobId++;
+    const startedAt = now();
+    const jobBase = {
+      jobId,
+      workflowName: payload.workflowName,
+      version: payload.baseVersion,
+      startedAt
+    };
+    emitRunEvent(sender, { type: "evolution-started", ...jobBase });
+    const result = await runPythonCli(
+      buildPythonEvolveArgs(payload, defaultOutputDir),
+      payload.repoRoot || repoRoot,
+      payload.pythonPath
+    );
+    const job = buildCliJobResult({
+      ...jobBase,
+      type: "evolution-finished",
+      result,
+      finishedAt: now(),
+      nowMs
+    });
+    emitRunEvent(sender, job);
+    return job;
+  }
+
+  async function createWorkflow({ sender, payload }) {
+    const jobId = nextJobId++;
+    const startedAt = now();
+    const jobBase = {
+      jobId,
+      startUrl: payload.startUrl,
+      startedAt
+    };
+    emitRunEvent(sender, { type: "creation-started", ...jobBase });
+    const result = await runPythonCli(
+      buildPythonCreateWorkflowArgs(payload, defaultOutputDir),
+      payload.repoRoot || repoRoot,
+      payload.pythonPath
+    );
+    const job = buildCliJobResult({
+      ...jobBase,
+      type: "creation-finished",
+      result,
+      finishedAt: now(),
+      nowMs
+    });
+    emitRunEvent(sender, job);
+    return job;
+  }
+
   async function applyProposal({ sender, payload }) {
     const jobId = nextJobId++;
     const startedAt = now();
@@ -140,9 +202,25 @@ function createWebmcpCoreClient(options) {
     return job;
   }
 
+  function pauseActiveJob({ sender } = {}) {
+    const result = pauseProcess();
+    emitRunEvent(sender, { type: "job-paused", ...result, at: now() });
+    return result;
+  }
+
+  function resumeActiveJob({ sender } = {}) {
+    const result = resumeProcess();
+    emitRunEvent(sender, { type: "job-resumed", ...result, at: now() });
+    return result;
+  }
+
   return {
     applyProposal,
+    createWorkflow,
+    evolveWorkflow,
+    pauseActiveJob,
     proposeUpdate,
+    resumeActiveJob,
     runVersion,
     runVersionQueue,
     pythonCommand

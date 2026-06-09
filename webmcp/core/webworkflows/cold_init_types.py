@@ -13,6 +13,8 @@ class ArtifactTrace:
     title: str | None = None
     final_url: str | None = None
     screenshots: list[str] | None = None
+    page_analysis_context: dict[str, Any] | None = None
+    knowledge_context: list[dict[str, Any]] | None = None
 
     def to_json(self) -> dict[str, Any]:
         return {
@@ -23,4 +25,6 @@ class ArtifactTrace:
             "title": self.title,
             "final_url": self.final_url,
             "screenshots": self.screenshots or [],
+            "page_analysis_context": self.page_analysis_context or {},
+            "knowledge_context": self.knowledge_context or [],
         }

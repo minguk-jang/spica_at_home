@@ -1,0 +1,10 @@
+{
+  "name": "webmcp-workspace",
+  "private": true,
+  "scripts": {
+    "db:sync-memory": "PYTHONPATH=core python3 core/scripts/sync_workflow_memory.py",
+    "db:sync-examples": "PYTHONPATH=core python3 core/scripts/sync_workflow_memory.py --only workflow_example",
+    "db:sync-naver": "PYTHONPATH=core python3 core/scripts/sync_workflow_memory.py --tag naver",
+    "db:sync-memory:dry": "PYTHONPATH=core python3 core/scripts/sync_workflow_memory.py --dry-run"
+  }
+}

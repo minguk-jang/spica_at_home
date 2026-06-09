@@ -170,6 +170,18 @@ pub struct WorkflowUpdateProposal {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
+pub struct WorkflowExample {
+    pub id: i64,
+    pub skill_id: i64,
+    pub user_request: String,
+    pub normalized_arguments: Value,
+    pub expected_output_summary: String,
+    pub success_count: i64,
+    pub last_used_at: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
 pub struct WorkflowDetail {
     pub workflow: WorkflowCard,
     pub versions: Vec<WorkflowVersion>,
@@ -180,11 +192,60 @@ pub struct WorkflowDetail {
     pub runs: Vec<WorkflowRun>,
     pub step_runs: Vec<StepRun>,
     pub update_events: Vec<UpdateEvent>,
+    pub examples: Vec<WorkflowExample>,
     pub proposals: Vec<WorkflowUpdateProposal>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct PageAnalysisMemory {
+    pub id: i64,
+    pub url_key: String,
+    pub canonical_url: String,
+    pub original_url: String,
+    pub title: Option<String>,
+    pub framework_hints: Value,
+    pub frame_hints: Value,
+    pub locator_hints: Value,
+    pub analysis: Value,
+    pub evidence: Value,
+    pub source: String,
+    pub observation_count: i64,
+    pub created_at: String,
+    pub updated_at: String,
+    pub last_seen_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkflowKnowledgeMemory {
+    pub id: i64,
+    pub category: String,
+    pub summary: String,
+    pub content: Value,
+    pub source: String,
+    pub confidence: f64,
+    pub tags: Value,
+    pub created_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct MemoryOverview {
+    pub page_analyses: Vec<PageAnalysisMemory>,
+    pub knowledge_entries: Vec<WorkflowKnowledgeMemory>,
+    pub page_analysis_count: i64,
+    pub knowledge_entry_count: i64,
+}
+
 pub fn list_workflows(db_path: &Path) -> SidecarResult<Vec<WorkflowCard>> {
+    if !db_path.exists() {
+        return Ok(Vec::new());
+    }
     let conn = connect(db_path)?;
+    if !table_exists(&conn, "workflow_skills")? {
+        return Ok(Vec::new());
+    }
     let mut stmt = conn
         .prepare(
             r#"
@@ -207,6 +268,7 @@ pub fn list_workflows(db_path: &Path) -> SidecarResult<Vec<WorkflowCard>> {
                 s.updated_at
             from workflow_skills s
             left join workflow_skill_versions v on v.id = s.latest_version_id
+            where s.status = 'stable'
             order by s.updated_at desc, s.id desc
             "#,
         )
@@ -259,8 +321,53 @@ pub fn workflow_detail(db_path: &Path, workflow_id: i64) -> SidecarResult<Workfl
         runs: runs(&conn, workflow_id)?,
         step_runs: step_runs(&conn, workflow_id)?,
         update_events: update_events(&conn, workflow_id)?,
+        examples: examples(&conn, workflow_id)?,
         proposals: proposals(&conn, workflow_id)?,
     })
+}
+
+pub fn memory_overview(db_path: &Path) -> SidecarResult<MemoryOverview> {
+    if !db_path.exists() {
+        return Ok(empty_memory_overview());
+    }
+    let conn = connect(db_path)?;
+
+    let page_analyses = if table_exists(&conn, "page_analyses")? {
+        page_analyses(&conn)?
+    } else {
+        Vec::new()
+    };
+    let knowledge_entries = if table_exists(&conn, "workflow_knowledge_entries")? {
+        workflow_knowledge_entries(&conn)?
+    } else {
+        Vec::new()
+    };
+    let page_analysis_count = if table_exists(&conn, "page_analyses")? {
+        table_count(&conn, "page_analyses")?
+    } else {
+        0
+    };
+    let knowledge_entry_count = if table_exists(&conn, "workflow_knowledge_entries")? {
+        table_count(&conn, "workflow_knowledge_entries")?
+    } else {
+        0
+    };
+
+    Ok(MemoryOverview {
+        page_analyses,
+        knowledge_entries,
+        page_analysis_count,
+        knowledge_entry_count,
+    })
+}
+
+fn empty_memory_overview() -> MemoryOverview {
+    MemoryOverview {
+        page_analyses: Vec::new(),
+        knowledge_entries: Vec::new(),
+        page_analysis_count: 0,
+        knowledge_entry_count: 0,
+    }
 }
 
 fn connect(db_path: &Path) -> SidecarResult<Connection> {
@@ -577,6 +684,38 @@ fn update_events(conn: &Connection, workflow_id: i64) -> SidecarResult<Vec<Updat
     rows.collect::<Result<Vec<_>, _>>().map_err(error_string)
 }
 
+fn examples(conn: &Connection, workflow_id: i64) -> SidecarResult<Vec<WorkflowExample>> {
+    if !table_exists(conn, "workflow_skill_examples")? {
+        return Ok(Vec::new());
+    }
+    let mut stmt = conn
+        .prepare(
+            r#"
+            select id, skill_id, user_request, normalized_arguments_json,
+                   expected_output_summary, success_count, last_used_at
+            from workflow_skill_examples
+            where skill_id = ?
+            order by success_count desc, id asc
+            limit 12
+            "#,
+        )
+        .map_err(error_string)?;
+    let rows = stmt
+        .query_map(params![workflow_id], |row| {
+            Ok(WorkflowExample {
+                id: row.get("id")?,
+                skill_id: row.get("skill_id")?,
+                user_request: row.get("user_request")?,
+                normalized_arguments: parse_json_text(row.get::<_, String>("normalized_arguments_json")?),
+                expected_output_summary: row.get("expected_output_summary")?,
+                success_count: row.get("success_count")?,
+                last_used_at: row.get("last_used_at")?,
+            })
+        })
+        .map_err(error_string)?;
+    rows.collect::<Result<Vec<_>, _>>().map_err(error_string)
+}
+
 fn proposals(conn: &Connection, workflow_id: i64) -> SidecarResult<Vec<WorkflowUpdateProposal>> {
     if !table_exists(conn, "workflow_update_proposals")? {
         return Ok(Vec::new());
@@ -622,6 +761,72 @@ fn proposals(conn: &Connection, workflow_id: i64) -> SidecarResult<Vec<WorkflowU
     rows.collect::<Result<Vec<_>, _>>().map_err(error_string)
 }
 
+fn page_analyses(conn: &Connection) -> SidecarResult<Vec<PageAnalysisMemory>> {
+    let mut stmt = conn
+        .prepare(
+            r#"
+            select id, url_key, canonical_url, original_url, title,
+                   framework_hints_json, frame_hints_json, locator_hints_json,
+                   analysis_json, evidence_json, source, observation_count,
+                   created_at, updated_at, last_seen_at
+            from page_analyses
+            order by datetime(last_seen_at) desc, id desc
+            limit 100
+            "#,
+        )
+        .map_err(error_string)?;
+    let rows = stmt
+        .query_map([], |row| {
+            Ok(PageAnalysisMemory {
+                id: row.get("id")?,
+                url_key: row.get("url_key")?,
+                canonical_url: row.get("canonical_url")?,
+                original_url: row.get("original_url")?,
+                title: row.get("title")?,
+                framework_hints: parse_json_text(row.get::<_, String>("framework_hints_json")?),
+                frame_hints: parse_json_text(row.get::<_, String>("frame_hints_json")?),
+                locator_hints: parse_json_text(row.get::<_, String>("locator_hints_json")?),
+                analysis: parse_json_text(row.get::<_, String>("analysis_json")?),
+                evidence: parse_json_text(row.get::<_, String>("evidence_json")?),
+                source: row.get("source")?,
+                observation_count: row.get("observation_count")?,
+                created_at: row.get("created_at")?,
+                updated_at: row.get("updated_at")?,
+                last_seen_at: row.get("last_seen_at")?,
+            })
+        })
+        .map_err(error_string)?;
+    rows.collect::<Result<Vec<_>, _>>().map_err(error_string)
+}
+
+fn workflow_knowledge_entries(conn: &Connection) -> SidecarResult<Vec<WorkflowKnowledgeMemory>> {
+    let mut stmt = conn
+        .prepare(
+            r#"
+            select id, category, summary, content_json, source, confidence, tags_json, created_at
+            from workflow_knowledge_entries
+            order by datetime(created_at) desc, id desc
+            limit 100
+            "#,
+        )
+        .map_err(error_string)?;
+    let rows = stmt
+        .query_map([], |row| {
+            Ok(WorkflowKnowledgeMemory {
+                id: row.get("id")?,
+                category: row.get("category")?,
+                summary: row.get("summary")?,
+                content: parse_json_text(row.get::<_, String>("content_json")?),
+                source: row.get("source")?,
+                confidence: row.get("confidence")?,
+                tags: parse_json_text(row.get::<_, String>("tags_json")?),
+                created_at: row.get("created_at")?,
+            })
+        })
+        .map_err(error_string)?;
+    rows.collect::<Result<Vec<_>, _>>().map_err(error_string)
+}
+
 fn table_exists(conn: &Connection, table_name: &str) -> SidecarResult<bool> {
     conn.query_row(
         "select exists(select 1 from sqlite_master where type = 'table' and name = ?)",
@@ -630,6 +835,12 @@ fn table_exists(conn: &Connection, table_name: &str) -> SidecarResult<bool> {
     )
     .map(|value| value != 0)
     .map_err(error_string)
+}
+
+fn table_count(conn: &Connection, table_name: &str) -> SidecarResult<i64> {
+    let sql = format!("select count(*) from {table_name}");
+    conn.query_row(&sql, [], |row| row.get::<_, i64>(0))
+        .map_err(error_string)
 }
 
 fn parse_json_text(raw: String) -> Value {
@@ -689,6 +900,15 @@ mod tests {
                 examples_json text not null,
                 is_dynamic integer not null,
                 order_index integer not null
+            );
+            create table workflow_skill_examples (
+                id integer primary key,
+                skill_id integer not null,
+                user_request text not null,
+                normalized_arguments_json text not null,
+                expected_output_summary text not null,
+                success_count integer not null default 0,
+                last_used_at text
             );
             create table workflow_skill_steps (
                 id integer primary key,
@@ -784,6 +1004,33 @@ mod tests {
                 created_at text not null,
                 updated_at text not null
             );
+            create table page_analyses (
+                id integer primary key,
+                url_key text not null unique,
+                canonical_url text not null,
+                original_url text not null,
+                title text,
+                framework_hints_json text not null,
+                frame_hints_json text not null,
+                locator_hints_json text not null,
+                analysis_json text not null,
+                evidence_json text not null,
+                source text not null,
+                observation_count integer not null default 1,
+                created_at text not null,
+                updated_at text not null,
+                last_seen_at text not null
+            );
+            create table workflow_knowledge_entries (
+                id integer primary key,
+                category text not null,
+                summary text not null,
+                content_json text not null,
+                source text not null,
+                confidence real not null,
+                tags_json text not null,
+                created_at text not null
+            );
 
             insert into workflow_skills values
               (1, 'naver_stock_report', 'naver-stock-report', 'Naver stock report', 'naver.com', 'stock_report', 'stable', 2, '2026-06-09 00:00:00', '2026-06-09 00:02:00');
@@ -792,6 +1039,9 @@ mod tests {
               (2, 1, 2, 'Updated version', '{"company_name":{"type":"string"}}', '{"report_text":"string"}', 'Load this workflow. Update v2.', '{"metadata_first":true}', 'stable', 10, '2026-06-09 00:02:00');
             insert into workflow_skill_arguments values
               (1, 2, 'company_name', '검색할 기업명', 'string', 1, null, '{}', '["삼성전자"]', 1, 0);
+            insert into workflow_skill_examples values
+              (1, 1, '네이버에서 삼성전자 주가 리포트', '{"company_name":"삼성전자","ticker":"005930","news_limit":3}', 'Markdown stock report', 2, '2026-06-09 00:04:30'),
+              (2, 1, '네이버에서 SK하이닉스 주가 리포트', '{"company_name":"SK하이닉스","ticker":"000660","news_limit":3}', 'Markdown stock report', 1, null);
             insert into workflow_skill_steps values
               (1, 2, 0, 'open_search', 'Open search page', 'goto', null, '{"url_template":"https://search.naver.com/search.naver?query={{company_name}} 주가"}', '{}', '{"url_contains":"search.naver.com"}', '{"retry":0}', '{"record_update_event":true}'),
               (2, 2, 1, 'extract_stock_card', 'Extract quote fields', 'run_handler', 'naver_stock.extract_stock_card', '{"handler":"naver_stock.extract_stock_card"}', '{}', '{"required_output":["company_name","current_price"]}', '{"retry":0}', '{"record_update_event":true}');
@@ -810,6 +1060,19 @@ mod tests {
                'draft', '{"skill_name":"naver_stock_report"}', '{"resources_changed":["stock_report_markdown"]}',
                '{"instruction":"Add valuation section."}', 9, null, null, null,
                '2026-06-09 00:05:00', '2026-06-09 00:05:00');
+            insert into page_analyses values
+              (50, 'search-naver-com-search-naver', 'https://search.naver.com/search.naver',
+               'https://search.naver.com/search.naver?query=삼성전자 주가', '삼성전자 주가 : 네이버 검색',
+               '{"frameworks":["server-rendered"],"signals":["Korean search result page"]}',
+               '{"has_iframes":false,"iframe_count":0,"recommended_frame_strategy":"main frame only"}',
+               '{"stable_text":["증권정보","현재가","005930"],"preferred_handlers":["naver_stock.extract_stock_card"]}',
+               '{"page_type":"naver_stock_search_result","actionable_tips":["Open the direct search URL with the company name and 주가 query instead of driving the home search box.","Wait for 증권정보, 현재가, and the six digit ticker before running extraction."],"selector_strategy":["Prefer the registered naver_stock.extract_stock_card handler over fragile price DOM selectors."],"risk_notes":["Price numbers and market status are volatile; assert structured keys, not exact text."]}',
+               '{"text_markers":["증권정보","현재가","005930"],"url":"https://search.naver.com/search.naver?query=삼성전자 주가"}',
+               'workflow_run', 2, '2026-06-09 00:06:00', '2026-06-09 00:07:00', '2026-06-09 00:07:00');
+            insert into workflow_knowledge_entries values
+              (60, 'script_generation', 'Naver stock card extraction should be handler-first and marker-gated.',
+               '{"url_shape":"https://search.naver.com/search.naver?query={{company_name}} 주가","actionable_tips":["Materialize workflows with direct search URLs so the page lands on the stock card in one navigation.","Use naver_stock.extract_stock_card once 증권정보 and 현재가 are visible, then assert company_name, ticker, current_price, report_text."],"failure_modes":["DOM class names and price text fluctuate during market sessions; exact text assertions cause false failures."],"output_assertions":["company_name","ticker","current_price","report_text"]}',
+               'workflow_run', 0.91, '["naver-stock","script-generation","handler-first"]', '2026-06-09 00:08:00');
             "#,
         )
         .expect("fixture schema");
@@ -830,6 +1093,59 @@ mod tests {
         assert_eq!(2, workflows[0].latest_version);
         assert_eq!(1, workflows[0].run_count);
         assert_eq!(12, workflows[0].last_run_duration_ms.unwrap());
+    }
+
+    #[test]
+    fn lists_no_workflows_when_db_is_missing() {
+        let temp = tempdir().expect("tempdir");
+        let db_path = temp.path().join("missing").join("workflows.sqlite");
+
+        let workflows = super::list_workflows(&db_path).expect("workflows");
+
+        assert!(workflows.is_empty());
+    }
+
+    #[test]
+    fn lists_no_workflows_when_db_has_no_schema() {
+        let temp = tempdir().expect("tempdir");
+        let db_path = temp.path().join("workflows.sqlite");
+        Connection::open(&db_path).expect("open db");
+
+        let workflows = super::list_workflows(&db_path).expect("workflows");
+
+        assert!(workflows.is_empty());
+    }
+
+    #[test]
+    fn loads_memory_overview_with_page_analysis_and_knowledge() {
+        let temp = tempdir().expect("tempdir");
+        let db_path = temp.path().join("workflows.sqlite");
+        let conn = Connection::open(&db_path).expect("open db");
+        create_fixture_db(&conn);
+        drop(conn);
+
+        let overview = super::memory_overview(&db_path).expect("memory overview");
+
+        assert_eq!(1, overview.page_analysis_count);
+        assert_eq!(1, overview.knowledge_entry_count);
+        assert_eq!("search-naver-com-search-naver", overview.page_analyses[0].url_key);
+        assert_eq!(
+            "naver_stock_search_result",
+            overview.page_analyses[0].analysis["page_type"]
+        );
+        assert_eq!(
+            "main frame only",
+            overview.page_analyses[0].frame_hints["recommended_frame_strategy"]
+        );
+        assert_eq!("script_generation", overview.knowledge_entries[0].category);
+        assert_eq!(
+            "https://search.naver.com/search.naver?query={{company_name}} 주가",
+            overview.knowledge_entries[0].content["url_shape"]
+        );
+        assert_eq!(
+            "naver-stock",
+            overview.knowledge_entries[0].tags[0]
+        );
     }
 
     #[test]
@@ -854,6 +1170,11 @@ mod tests {
         assert_eq!("stock_report_markdown", detail.resources[0].name);
         assert_eq!("succeeded", detail.runs[0].status);
         assert_eq!("new_example", detail.update_events[0].update_type);
+        assert_eq!("네이버에서 삼성전자 주가 리포트", detail.examples[0].user_request);
+        assert_eq!(
+            "삼성전자",
+            detail.examples[0].normalized_arguments["company_name"]
+        );
         assert_eq!("draft", detail.proposals[0].status);
         assert_eq!(3, detail.proposals[0].proposed_version);
     }

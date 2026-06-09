@@ -1,6 +1,6 @@
 use std::env;
 use std::path::PathBuf;
-use webmcp_sidecar::{list_workflows, workflow_detail};
+use webmcp_sidecar::{list_workflows, memory_overview, workflow_detail};
 
 fn main() {
     if let Err(error) = run() {
@@ -27,6 +27,11 @@ fn run() -> Result<(), String> {
             let detail = workflow_detail(&PathBuf::from(db), workflow_id)?;
             print_json(&detail)
         }
+        "memory-overview" => {
+            let db = required_arg(&args, "--db")?;
+            let overview = memory_overview(&PathBuf::from(db))?;
+            print_json(&overview)
+        }
         _ => Err(usage()),
     }
 }
@@ -44,6 +49,6 @@ fn print_json<T: serde::Serialize>(value: &T) -> Result<(), String> {
 }
 
 fn usage() -> String {
-    "usage: webmcp-sidecar <list-workflows|workflow-detail> --db <path> [--workflow-id <id>]"
+    "usage: webmcp-sidecar <list-workflows|workflow-detail|memory-overview> --db <path> [--workflow-id <id>]"
         .to_string()
 }

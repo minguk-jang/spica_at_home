@@ -87,6 +87,7 @@ flowchart TB
   subgraph CoreFacade["Core facade"]
     Runtime["services/workflow_runtime.py<br/>run latest/version"]
     Update["services/update_runtime.py<br/>propose/apply"]
+    Evolution["services/evolution_runtime.py<br/>eval/repair/rerun"]
     Provider["providers/synthesis_provider.py<br/>backend 선택"]
   end
 
@@ -95,6 +96,8 @@ flowchart TB
   Client --> Runner
   Runner --> Runtime
   Runtime --> Update
+  Runtime --> Evolution
+  Evolution --> Update
   Update --> Provider
 ```
 
@@ -150,13 +153,56 @@ flowchart TD
   DB["SQLite DB<br/>metadata, versions, steps, resources, runs"]
   Code["Python source<br/>webworkflows/*.py"]
   Preview["Desktop script preview<br/>검사용 단일 파일"]
+  Eval["eval artifacts<br/>screenshots, page text, Codex VLM JSON"]
 
   DB -->|handler id 저장| Code
   Code -->|실제 실행| DB
   DB -->|step/resource 표시| Preview
   Code -->|handler source inline| Preview
+  Code -->|Playwright evidence| Eval
+  Eval -->|평가 결과 기록| DB
 ```
 
 워크플로우 정의는 DB에 저장되지만, 실행 가능한 Python 함수는 source file에
 남습니다. Desktop의 Implementation preview는 감사와 이해를 위한 생성물이며,
 실제 실행의 source of truth가 아닙니다.
+
+Eval and evolve loop도 같은 원칙을 따릅니다. Core는 Playwright로 evidence를
+수집하고 SQLite에 기록한 뒤, Codex VLM evaluator가 기본 모델 `gpt-5.5`로 각 step의
+화면과 텍스트 증거를 평가합니다. 평가 결과는 `summary`, `expected_state`,
+`observed_state`, `problems`, `repair_focus`를 포함한 JSON으로 DB와 Desktop UI에
+전달됩니다.
+
+VLM evaluator의 현재 기본 경로와 교체 절차는 [VLM_EVALUATION.md](VLM_EVALUATION.md)
+에 정리되어 있습니다. 기본 `--vlm-evaluator codex`는 `codex exec` 반복 호출이 아니라
+Codex app-server와 저장된 Codex OAuth 로그인을 사용합니다.
+
+## Evolution Runtime
+
+```mermaid
+flowchart TB
+  Evolve["WorkflowEvolutionRuntime"]
+  Session["evolution_sessions"]
+  Attempt["evolution_attempts"]
+  Request["repair_requests<br/>repair_request.json"]
+  Response["repair_responses<br/>repair_response.json"]
+  UpdateProposal["workflow_update_proposals"]
+  Executor["WorkflowExecutor"]
+  EvalLoop["PlaywrightEvalAndEvolveLoop"]
+
+  Evolve --> Session
+  Evolve --> Attempt
+  Evolve --> Executor
+  Executor --> EvalLoop
+  EvalLoop -->|fail| Request
+  Request -->|active Codex 작성| Response
+  Response --> UpdateProposal
+  UpdateProposal -->|apply| Attempt
+  Attempt -->|next version| Executor
+```
+
+Evolution runtime은 Core 내부에서 모델을 호출하는 backend가 아닙니다. Core의
+역할은 실행, 평가 artifact 저장, repair request 작성, agent-json workflow 적용,
+재실행입니다. Codex harness는 이 바깥에서 artifact를 읽고 다음 workflow JSON을
+작성합니다. 이 경계를 유지해야 OpenAI-compatible API, Claude Code, 다른 Desktop
+frontend로 옮길 때 실행 엔진과 agent 판단을 분리할 수 있습니다.

@@ -1,21 +1,30 @@
 const { app, BrowserWindow, ipcMain, shell } = require("electron");
 const path = require("path");
 const fs = require("fs");
-const { collectProcess } = require("./process-runner.cjs");
+const {
+  collectProcess,
+  pauseCurrentProcess,
+  resumeCurrentProcess,
+  terminateCurrentProcess
+} = require("./process-runner.cjs");
 const { createSidecarRunner, registerWebmcpIpcHandlers } = require("./ipc-handlers.cjs");
-const { createProjectPaths } = require("./project-paths.cjs");
+const { createProjectPaths, ensureDefaultDbDirectory } = require("./project-paths.cjs");
 const { createWebmcpCoreClient } = require("./webmcp-core-client.cjs");
 
 const appRoot = path.resolve(__dirname, "..");
 const projectPaths = createProjectPaths(appRoot);
 const repoRoot = projectPaths.coreRoot;
 const defaultDbPath = projectPaths.defaultDbPath;
+ensureDefaultDbDirectory(defaultDbPath);
 const defaultOutputDir = projectPaths.defaultOutputDir;
 const defaultPythonPath = projectPaths.defaultPythonPath;
 const coreClient = createWebmcpCoreClient({
   repoRoot,
   defaultOutputDir,
   defaultPythonPath,
+  collectProcess,
+  pauseProcess: pauseCurrentProcess,
+  resumeProcess: resumeCurrentProcess,
   openExternal: (url) => shell.openExternal(url)
 });
 const runSidecar = createSidecarRunner({
@@ -58,6 +67,10 @@ function createWindow() {
 }
 
 app.whenReady().then(createWindow);
+
+app.on("before-quit", () => {
+  terminateCurrentProcess();
+});
 
 app.on("window-all-closed", () => {
   if (process.platform !== "darwin") {

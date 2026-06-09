@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from webworkflows.eval_loop import EvalAndEvolveLoop
 from webworkflows.executor import WorkflowExecutor
 from webworkflows.loader import WorkflowSkill, WorkflowSkillLoader
 from webworkflows.storage import WorkflowSkillStore
@@ -19,9 +20,16 @@ class PageTextEvidence:
 
 
 class WorkflowRuntime:
-    def __init__(self, store: WorkflowSkillStore, *, output_dir: str | Path):
+    def __init__(
+        self,
+        store: WorkflowSkillStore,
+        *,
+        output_dir: str | Path,
+        evaluation_loop: EvalAndEvolveLoop | None = None,
+    ):
         self.store = store
         self.output_dir = Path(output_dir)
+        self.evaluation_loop = evaluation_loop
 
     def run_latest(
         self,
@@ -67,13 +75,13 @@ class WorkflowRuntime:
         arguments: dict[str, Any],
         page_text_evidence: PageTextEvidence | dict[str, Any],
     ) -> dict[str, Any]:
-        result = WorkflowExecutor(self.store, output_dir=self.output_dir).run(
+        result = WorkflowExecutor(self.store, output_dir=self.output_dir, evaluation_loop=self.evaluation_loop).run(
             skill,
             user_request=user_request,
             arguments=arguments,
         )
         evidence = page_text_evidence.as_dict() if isinstance(page_text_evidence, PageTextEvidence) else page_text_evidence
-        return {
+        payload = {
             "workflow": skill.name,
             "workflow_version": skill.version,
             "run_id": result.run_id,
@@ -83,3 +91,6 @@ class WorkflowRuntime:
             "output": result.output,
             "report_path": result.report_path,
         }
+        if result.evaluation is not None:
+            payload["evaluation"] = result.evaluation
+        return payload

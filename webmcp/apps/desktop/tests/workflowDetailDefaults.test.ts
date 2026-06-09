@@ -16,5 +16,6 @@ test("adds an empty proposal list to legacy workflow details", () => {
   });
 
   assert.deepEqual(detail.handlers, []);
+  assert.deepEqual(detail.examples, []);
   assert.deepEqual(detail.proposals, []);
 });

@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
+import sys
 from pathlib import Path
 
 from webworkflows.cold_init import (
@@ -12,8 +14,18 @@ from webworkflows.cold_init import (
     StaticDiscoveryRunner,
     StaticTraceCollector,
 )
+from webworkflows.dynamic_browser import CodexCliDynamicBrowserActionPlanner
+from webworkflows.eval_loop import PlaywrightEvalAndEvolveLoop, WorkflowEvaluationError
+from webworkflows.cold_init_types import ArtifactTrace
+from webworkflows.page_memory import PageAnalysisStore, WorkflowKnowledgeStore, build_script_generation_knowledge
 from webworkflows.seeds import seed_naver_stock_report
 from webworkflows.services.update_runtime import WorkflowUpdateRuntime
+from webworkflows.services.evolution_runtime import WorkflowEvolutionRuntime
+from webworkflows.services.creation_runtime import (
+    GenericBrowserTraceCollector,
+    StaticCreationTraceCollector,
+    WorkflowCreationRuntime,
+)
 from webworkflows.services.workflow_runtime import WorkflowRuntime
 from webworkflows.synthesis import (
     AgentJsonSynthesisBackend,
@@ -22,7 +34,14 @@ from webworkflows.synthesis import (
     LLMWorkflowSynthesizer,
     naver_stock_workflow_json,
 )
-from webworkflows.storage import WorkflowSkillStore
+from webworkflows.storage import WorkflowSkillStore, default_studio_db_path
+from webworkflows.vlm_codex import (
+    CodexAppServerVisionLanguageEvaluator,
+    CodexCliVisionLanguageEvaluator,
+    CodexResponsesVisionLanguageEvaluator,
+)
+
+BROWSER_RUNTIME_REEXEC_ENV = "WEBMCP_BROWSER_RUNTIME_REEXECED"
 
 
 def main() -> None:
@@ -30,31 +49,35 @@ def main() -> None:
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     run_parser = subparsers.add_parser("run")
-    run_parser.add_argument("--db", required=True)
+    add_db_arg(run_parser)
     run_parser.add_argument("--output-dir", required=True)
     run_parser.add_argument("--request", required=True)
-    run_parser.add_argument("--company-name", required=True)
+    run_parser.add_argument("--company-name")
     run_parser.add_argument("--ticker")
     run_parser.add_argument("--page-text-file")
     run_parser.add_argument("--news-limit", type=int, default=3)
+    run_parser.add_argument("--argument", action="append", default=[])
     run_parser.add_argument("--live-page-text", action="store_true")
     run_parser.add_argument("--headed", action="store_true")
+    add_eval_loop_args(run_parser)
 
     run_version_parser = subparsers.add_parser("run-version")
-    run_version_parser.add_argument("--db", required=True)
+    add_db_arg(run_version_parser)
     run_version_parser.add_argument("--output-dir", required=True)
     run_version_parser.add_argument("--workflow-name", required=True)
     run_version_parser.add_argument("--version", type=int, required=True)
     run_version_parser.add_argument("--request", required=True)
-    run_version_parser.add_argument("--company-name", required=True)
+    run_version_parser.add_argument("--company-name")
     run_version_parser.add_argument("--ticker")
     run_version_parser.add_argument("--page-text-file")
     run_version_parser.add_argument("--news-limit", type=int, default=3)
+    run_version_parser.add_argument("--argument", action="append", default=[])
     run_version_parser.add_argument("--live-page-text", action="store_true")
     run_version_parser.add_argument("--headed", action="store_true")
+    add_eval_loop_args(run_version_parser)
 
     propose_update_parser = subparsers.add_parser("propose-update")
-    propose_update_parser.add_argument("--db", required=True)
+    add_db_arg(propose_update_parser)
     propose_update_parser.add_argument("--output-dir")
     propose_update_parser.add_argument("--workflow-name", required=True)
     propose_update_parser.add_argument("--base-version", type=int, required=True)
@@ -77,12 +100,12 @@ def main() -> None:
     propose_update_parser.add_argument("--headed", action="store_true")
 
     apply_proposal_parser = subparsers.add_parser("apply-proposal")
-    apply_proposal_parser.add_argument("--db", required=True)
+    add_db_arg(apply_proposal_parser)
     apply_proposal_parser.add_argument("--proposal-id", type=int, required=True)
     apply_proposal_parser.add_argument("--approved-by", default="desktop")
 
     cold_parser = subparsers.add_parser("cold-init")
-    cold_parser.add_argument("--db", required=True)
+    add_db_arg(cold_parser)
     cold_parser.add_argument("--output-dir", required=True)
     cold_parser.add_argument("--request", required=True)
     cold_parser.add_argument("--company-name", required=True)
@@ -95,9 +118,10 @@ def main() -> None:
         default="static",
     )
     cold_parser.add_argument("--headed", action="store_true")
+    add_eval_loop_args(cold_parser)
 
     intelligent_parser = subparsers.add_parser("intelligent-cold-init")
-    intelligent_parser.add_argument("--db", required=True)
+    add_db_arg(intelligent_parser)
     intelligent_parser.add_argument("--output-dir", required=True)
     intelligent_parser.add_argument("--request", required=True)
     intelligent_parser.add_argument("--company-name", required=True)
@@ -117,64 +141,293 @@ def main() -> None:
     intelligent_parser.add_argument("--workflow-json-file")
     intelligent_parser.add_argument("--synthesizer-model", default=DEFAULT_CODEX_SYNTHESIS_MODEL)
     intelligent_parser.add_argument("--headed", action="store_true")
+    add_eval_loop_args(intelligent_parser)
+
+    create_parser = subparsers.add_parser("create-workflow")
+    add_db_arg(create_parser)
+    create_parser.add_argument("--output-dir", required=True)
+    create_parser.add_argument("--start-url", required=True)
+    create_parser.add_argument("--task", required=True)
+    create_parser.add_argument("--final-state", required=True)
+    create_parser.add_argument("--company-name")
+    create_parser.add_argument("--ticker")
+    create_parser.add_argument("--news-limit", type=int)
+    create_parser.add_argument("--argument", action="append", default=[])
+    create_parser.add_argument("--page-text-file")
+    create_parser.add_argument(
+        "--discovery-provider",
+        choices=("browser", "static"),
+        default="browser",
+    )
+    create_parser.add_argument(
+        "--synthesizer",
+        choices=("agent-json", "codex", "fake-naver-stock"),
+        default="codex",
+    )
+    create_parser.add_argument("--workflow-json-file")
+    create_parser.add_argument("--synthesizer-model", default=DEFAULT_CODEX_SYNTHESIS_MODEL)
+    create_parser.add_argument("--max-attempts", type=int, default=3)
+    create_parser.add_argument(
+        "--repair-synthesizer",
+        choices=("codex", "agent-json", "fake-copy"),
+        default="codex",
+    )
+    create_parser.add_argument("--headed", action="store_true")
+    add_eval_loop_args(create_parser)
+
+    evolve_parser = subparsers.add_parser("evolve")
+    add_db_arg(evolve_parser)
+    evolve_parser.add_argument("--output-dir", required=True)
+    evolve_parser.add_argument("--workflow-name", required=True)
+    evolve_parser.add_argument("--base-version", type=int, required=True)
+    evolve_parser.add_argument("--request", required=True)
+    evolve_parser.add_argument("--company-name")
+    evolve_parser.add_argument("--ticker")
+    evolve_parser.add_argument("--page-text-file")
+    evolve_parser.add_argument("--news-limit", type=int, default=3)
+    evolve_parser.add_argument("--argument", action="append", default=[])
+    evolve_parser.add_argument("--max-attempts", type=int, default=3)
+    evolve_parser.add_argument(
+        "--repair-synthesizer",
+        choices=("agent-json", "fake-copy", "codex"),
+        default="agent-json",
+    )
+    evolve_parser.add_argument("--repair-workflow-json-file")
+    evolve_parser.add_argument("--synthesizer-model", default=DEFAULT_CODEX_SYNTHESIS_MODEL)
+    evolve_parser.add_argument("--headed", action="store_true")
+    add_eval_loop_args(evolve_parser)
 
     args = parser.parse_args()
-    if args.command == "run":
-        run(args)
-    elif args.command == "run-version":
-        run_version(args)
-    elif args.command == "propose-update":
-        propose_update(args)
-    elif args.command == "apply-proposal":
-        apply_proposal(args)
-    elif args.command == "cold-init":
-        cold_init(args)
-    elif args.command == "intelligent-cold-init":
-        intelligent_cold_init(args)
+    maybe_reexec_with_browser_runtime(args)
+    try:
+        if args.command == "run":
+            run(args)
+        elif args.command == "run-version":
+            run_version(args)
+        elif args.command == "propose-update":
+            propose_update(args)
+        elif args.command == "apply-proposal":
+            apply_proposal(args)
+        elif args.command == "cold-init":
+            cold_init(args)
+        elif args.command == "intelligent-cold-init":
+            intelligent_cold_init(args)
+        elif args.command == "create-workflow":
+            create_workflow(args)
+        elif args.command == "evolve":
+            evolve(args)
+    except WorkflowEvaluationError as exc:
+        print(
+            json.dumps(
+                {
+                    "status": "failed",
+                    "error_type": "workflow_evaluation_failed",
+                    "message": str(exc),
+                    "evaluation": exc.report.as_dict(),
+                },
+                ensure_ascii=False,
+                sort_keys=True,
+            )
+        )
+        raise SystemExit(2)
+
+
+def add_eval_loop_args(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--eval-and-evolve", action="store_true")
+    parser.add_argument(
+        "--vlm-evaluator",
+        choices=("codex", "codex-cli", "openai-responses"),
+        default="codex",
+        help="Codex VLM evaluator backend for --eval-and-evolve.",
+    )
+    parser.add_argument("--vlm-model", default=DEFAULT_CODEX_SYNTHESIS_MODEL, help=argparse.SUPPRESS)
+    parser.add_argument(
+        "--eval-browser",
+        choices=("chromium", "firefox", "webkit"),
+        default="chromium",
+        help="Playwright browser used by --eval-and-evolve.",
+    )
+
+
+def add_db_arg(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--db",
+        default=None,
+        help="SQLite workflow DB path. Defaults to WEBMCP_STUDIO_DB_PATH or ~/.webmcp-studio/db/workflows.sqlite.",
+    )
+
+
+def resolve_db_arg(args: argparse.Namespace) -> Path:
+    return Path(args.db).expanduser() if getattr(args, "db", None) else default_studio_db_path()
+
+
+def requires_browser_runtime(args: argparse.Namespace) -> bool:
+    if getattr(args, "eval_and_evolve", False):
+        return True
+
+    command = getattr(args, "command", "")
+    if command in {"run", "run-version"}:
+        return bool(getattr(args, "live_page_text", False))
+    if command in {"cold-init", "intelligent-cold-init"}:
+        return getattr(args, "discovery_provider", "static") == "naver-browser"
+    if command == "propose-update":
+        return getattr(args, "discovery_provider", "none") == "webwright"
+    if command == "create-workflow":
+        return getattr(args, "discovery_provider", "browser") == "browser"
+    if command == "evolve":
+        return True
+    return False
+
+
+def browser_runtime_python(core_root: Path | None = None) -> Path | None:
+    root = core_root or Path(__file__).resolve().parents[1]
+    scripts_dir = "Scripts" if os.name == "nt" else "bin"
+    executable = "python.exe" if os.name == "nt" else "python"
+    candidate = root / "reference" / "webwright" / ".venv" / scripts_dir / executable
+    return candidate if candidate.exists() else None
+
+
+def maybe_reexec_with_browser_runtime(
+    args: argparse.Namespace,
+    *,
+    argv: list[str] | None = None,
+    core_root: Path | None = None,
+) -> None:
+    if not requires_browser_runtime(args):
+        return
+    if _has_playwright():
+        return
+    if os.environ.get(BROWSER_RUNTIME_REEXEC_ENV) == "1":
+        return
+
+    python_path = browser_runtime_python(core_root)
+    if python_path is None or _same_path(Path(sys.executable), python_path):
+        return
+
+    env = os.environ.copy()
+    env[BROWSER_RUNTIME_REEXEC_ENV] = "1"
+    exec_args = [str(python_path), "-m", "webworkflows.cli", *(argv if argv is not None else sys.argv[1:])]
+    os.execve(str(python_path), exec_args, env)
+    raise SystemExit(0)
+
+
+def _has_playwright() -> bool:
+    try:
+        import playwright.async_api  # noqa: F401
+    except ModuleNotFoundError:
+        return False
+    return True
+
+
+def _same_path(left: Path, right: Path) -> bool:
+    try:
+        return left.resolve() == right.resolve()
+    except OSError:
+        return left == right
+
+
+def build_evaluation_loop(args: argparse.Namespace):
+    if not getattr(args, "eval_and_evolve", False):
+        return None
+    model = getattr(args, "vlm_model", DEFAULT_CODEX_SYNTHESIS_MODEL)
+    evaluator_name = getattr(args, "vlm_evaluator", "codex")
+    if evaluator_name == "codex-cli":
+        evaluator = CodexCliVisionLanguageEvaluator(
+            model=model,
+            cwd=Path(__file__).resolve().parents[1],
+        )
+    elif evaluator_name == "openai-responses":
+        evaluator = CodexResponsesVisionLanguageEvaluator(model=model)
+    else:
+        evaluator = CodexAppServerVisionLanguageEvaluator(
+            model=model,
+            cwd=Path(__file__).resolve().parents[1],
+        )
+    return PlaywrightEvalAndEvolveLoop(
+        evaluator=evaluator,
+        headed=getattr(args, "headed", False),
+        browser_name=args.eval_browser,
+        dynamic_action_planner=CodexCliDynamicBrowserActionPlanner(
+            model=model,
+            cwd=Path(__file__).resolve().parents[1],
+        ),
+    )
 
 
 def run(args: argparse.Namespace) -> None:
-    store = WorkflowSkillStore(args.db)
+    store = WorkflowSkillStore(resolve_db_arg(args))
     store.initialize()
     seed_naver_stock_report(store)
 
-    page_text, page_text_evidence = resolve_run_page_text(args)
-    payload = WorkflowRuntime(store, output_dir=args.output_dir).run_latest(
+    evaluation_loop = build_evaluation_loop(args)
+    page_text, page_text_evidence = resolve_run_page_text(args, skip_live_browser=bool(evaluation_loop))
+    arguments = _workflow_arguments(args, page_text=page_text)
+    page_analysis_context = _record_observed_page_analysis(
+        store,
         user_request=args.request,
-        arguments={
-            "company_name": args.company_name,
-            "ticker": args.ticker,
-            "page_text": page_text,
-            "news_limit": args.news_limit,
-        },
+        arguments=arguments,
+        page_text=page_text,
         page_text_evidence=page_text_evidence,
+        source="workflow_run",
+    )
+    payload = WorkflowRuntime(store, output_dir=args.output_dir, evaluation_loop=evaluation_loop).run_latest(
+        user_request=args.request,
+        arguments=arguments,
+        page_text_evidence=page_text_evidence,
+    )
+    _record_run_knowledge(
+        store,
+        status=str(payload.get("status") or "unknown"),
+        workflow_name=str(payload.get("workflow") or ""),
+        workflow_version=payload.get("workflow_version"),
+        user_request=args.request,
+        arguments=arguments,
+        page_text_evidence=page_text_evidence,
+        payload=payload,
+        page_analysis_context=page_analysis_context,
     )
     print(json.dumps(payload, ensure_ascii=False, sort_keys=True))
 
 
 def run_version(args: argparse.Namespace) -> None:
-    store = WorkflowSkillStore(args.db)
+    store = WorkflowSkillStore(resolve_db_arg(args))
     store.initialize()
     seed_naver_stock_report(store)
 
-    page_text, page_text_evidence = resolve_run_page_text(args)
-    payload = WorkflowRuntime(store, output_dir=args.output_dir).run_version(
+    evaluation_loop = build_evaluation_loop(args)
+    page_text, page_text_evidence = resolve_run_page_text(args, skip_live_browser=bool(evaluation_loop))
+    arguments = _workflow_arguments(args, page_text=page_text)
+    page_analysis_context = _record_observed_page_analysis(
+        store,
+        user_request=args.request,
+        arguments=arguments,
+        page_text=page_text,
+        page_text_evidence=page_text_evidence,
+        source="workflow_run_version",
+    )
+    payload = WorkflowRuntime(store, output_dir=args.output_dir, evaluation_loop=evaluation_loop).run_version(
         workflow_name=args.workflow_name,
         version=args.version,
         user_request=args.request,
-        arguments={
-            "company_name": args.company_name,
-            "ticker": args.ticker,
-            "page_text": page_text,
-            "news_limit": args.news_limit,
-        },
+        arguments=arguments,
         page_text_evidence=page_text_evidence,
+    )
+    _record_run_knowledge(
+        store,
+        status=str(payload.get("status") or "unknown"),
+        workflow_name=str(payload.get("workflow") or args.workflow_name),
+        workflow_version=payload.get("workflow_version"),
+        user_request=args.request,
+        arguments=arguments,
+        page_text_evidence=page_text_evidence,
+        payload=payload,
+        page_analysis_context=page_analysis_context,
     )
     print(json.dumps(payload, ensure_ascii=False, sort_keys=True))
 
 
 def propose_update(args: argparse.Namespace) -> None:
-    store = WorkflowSkillStore(args.db)
+    store = WorkflowSkillStore(resolve_db_arg(args))
     store.initialize()
     seed_naver_stock_report(store)
     if args.discovery_provider == "webwright":
@@ -206,7 +459,7 @@ def propose_update(args: argparse.Namespace) -> None:
 
 
 def apply_proposal(args: argparse.Namespace) -> None:
-    store = WorkflowSkillStore(args.db)
+    store = WorkflowSkillStore(resolve_db_arg(args))
     store.initialize()
     payload = WorkflowUpdateRuntime(store).apply_proposal(
         proposal_id=args.proposal_id,
@@ -215,8 +468,19 @@ def apply_proposal(args: argparse.Namespace) -> None:
     print(json.dumps(payload, ensure_ascii=False, sort_keys=True))
 
 
-def resolve_run_page_text(args: argparse.Namespace) -> tuple[str, dict]:
-    if getattr(args, "live_page_text", False) or not getattr(args, "page_text_file", None):
+def resolve_run_page_text(args: argparse.Namespace, *, skip_live_browser: bool = False) -> tuple[str, dict]:
+    if skip_live_browser:
+        if getattr(args, "page_text_file", None):
+            return Path(args.page_text_file).read_text(encoding="utf-8"), {
+                "source": "page_text_file",
+                "path": str(args.page_text_file),
+                "eval_and_evolve": True,
+            }
+        return "", {
+            "source": "eval_and_evolve_browser",
+            "provider": "playwright_vlm_monitor",
+        }
+    if getattr(args, "live_page_text", False):
         trace = NaverBrowserTraceCollector(output_dir=args.output_dir, headed=getattr(args, "headed", False)).collect(
             args.request,
             {
@@ -232,14 +496,17 @@ def resolve_run_page_text(args: argparse.Namespace) -> tuple[str, dict]:
             "screenshots": trace.screenshots,
         }
 
-    return Path(args.page_text_file).read_text(encoding="utf-8"), {
-        "source": "page_text_file",
-        "path": str(args.page_text_file),
-    }
+    if getattr(args, "page_text_file", None):
+        return Path(args.page_text_file).read_text(encoding="utf-8"), {
+            "source": "page_text_file",
+            "path": str(args.page_text_file),
+        }
+
+    return "", {"source": "not_required"}
 
 
 def cold_init(args: argparse.Namespace) -> None:
-    store = WorkflowSkillStore(args.db)
+    store = WorkflowSkillStore(resolve_db_arg(args))
     store.initialize()
     if args.discovery_provider == "static":
         if not args.page_text_file:
@@ -251,6 +518,7 @@ def cold_init(args: argparse.Namespace) -> None:
         store,
         output_dir=args.output_dir,
         discovery_runner=discovery_runner,
+        evaluation_loop=build_evaluation_loop(args),
     ).run(
         user_request=args.request,
         arguments={
@@ -281,7 +549,7 @@ def cold_init(args: argparse.Namespace) -> None:
 
 
 def intelligent_cold_init(args: argparse.Namespace) -> None:
-    store = WorkflowSkillStore(args.db)
+    store = WorkflowSkillStore(resolve_db_arg(args))
     store.initialize()
     if args.discovery_provider == "static":
         if not args.page_text_file:
@@ -305,6 +573,7 @@ def intelligent_cold_init(args: argparse.Namespace) -> None:
         output_dir=args.output_dir,
         trace_collector=trace_collector,
         synthesizer=synthesizer,
+        evaluation_loop=build_evaluation_loop(args),
     ).run(
         user_request=args.request,
         arguments={
@@ -337,6 +606,158 @@ def intelligent_cold_init(args: argparse.Namespace) -> None:
             sort_keys=True,
         )
     )
+
+
+def create_workflow(args: argparse.Namespace) -> None:
+    store = WorkflowSkillStore(resolve_db_arg(args))
+    store.initialize()
+    if args.discovery_provider == "static":
+        if not args.page_text_file:
+            raise SystemExit("--page-text-file is required for static workflow creation")
+        trace_collector = StaticCreationTraceCollector(
+            page_text=Path(args.page_text_file).read_text(encoding="utf-8"),
+            final_url=args.start_url,
+        )
+    else:
+        trace_collector = GenericBrowserTraceCollector(output_dir=args.output_dir, headed=args.headed)
+
+    if args.synthesizer == "fake-naver-stock":
+        backend = FakeSynthesisBackend(response=naver_stock_workflow_json())
+    elif args.synthesizer == "agent-json":
+        if not args.workflow_json_file:
+            raise SystemExit("--workflow-json-file is required with --synthesizer agent-json")
+        backend = AgentJsonSynthesisBackend(workflow_json_path=args.workflow_json_file)
+    else:
+        backend = None
+    synthesizer = LLMWorkflowSynthesizer(backend=backend, model=args.synthesizer_model)
+    arguments = _creation_arguments(args)
+
+    payload = WorkflowCreationRuntime(
+        store,
+        output_dir=args.output_dir,
+        trace_collector=trace_collector,
+        synthesizer=synthesizer,
+        evaluation_loop=build_evaluation_loop(args),
+        cwd=Path(__file__).resolve().parents[1],
+    ).create(
+        start_url=args.start_url,
+        user_task=args.task,
+        final_state=args.final_state,
+        arguments=arguments,
+        max_attempts=args.max_attempts,
+        repair_synthesizer=args.repair_synthesizer,
+        synthesizer_model=args.synthesizer_model,
+    )
+    print(json.dumps(payload, ensure_ascii=False, sort_keys=True))
+
+
+def _creation_arguments(args: argparse.Namespace) -> dict[str, object]:
+    return _workflow_arguments(args)
+
+
+def _workflow_arguments(args: argparse.Namespace, *, page_text: str | None = None) -> dict[str, object]:
+    arguments: dict[str, object] = {}
+    for item in getattr(args, "argument", []):
+        if "=" not in item:
+            raise SystemExit(f"--argument must be name=value, got: {item}")
+        key, value = item.split("=", 1)
+        if not key.strip():
+            raise SystemExit(f"--argument key is empty: {item}")
+        arguments[key.strip()] = value
+    if getattr(args, "company_name", None):
+        arguments["company_name"] = args.company_name
+    if getattr(args, "ticker", None):
+        arguments["ticker"] = args.ticker
+    if getattr(args, "news_limit", None) is not None:
+        arguments["news_limit"] = args.news_limit
+    if page_text is not None:
+        arguments["page_text"] = page_text
+    return arguments
+
+
+def _record_observed_page_analysis(
+    store: WorkflowSkillStore,
+    *,
+    user_request: str,
+    arguments: dict[str, object],
+    page_text: str,
+    page_text_evidence: dict,
+    source: str,
+) -> dict[str, object] | None:
+    if not page_text:
+        return None
+    final_url = str(page_text_evidence.get("final_url") or arguments.get("start_url") or "")
+    if not final_url:
+        return None
+    trace = ArtifactTrace(
+        provider=str(page_text_evidence.get("provider") or page_text_evidence.get("source") or source),
+        user_request=user_request,
+        arguments=dict(arguments),
+        page_text=page_text,
+        title=str(page_text_evidence.get("title") or ""),
+        final_url=final_url,
+        screenshots=list(page_text_evidence.get("screenshots") or []),
+    )
+    return PageAnalysisStore(store).upsert_from_trace(trace, source=source).as_context()
+
+
+def _record_run_knowledge(
+    store: WorkflowSkillStore,
+    *,
+    status: str,
+    workflow_name: str,
+    workflow_version: object,
+    user_request: str,
+    arguments: dict[str, object],
+    page_text_evidence: dict,
+    payload: dict,
+    page_analysis_context: dict[str, object] | None,
+) -> None:
+    if not page_analysis_context:
+        return
+    output = payload.get("output") if isinstance(payload.get("output"), dict) else {}
+    knowledge = build_script_generation_knowledge(
+        status=status,
+        workflow_name=workflow_name,
+        workflow_version=int(workflow_version) if isinstance(workflow_version, int) else None,
+        start_url=str(page_text_evidence.get("final_url") or arguments.get("start_url") or ""),
+        user_task=user_request,
+        final_state="Observed workflow run completed with live/static page text evidence.",
+        output_keys=sorted(output.keys()),
+        page_analysis=page_analysis_context.get("analysis") if page_analysis_context else None,
+        error=output.get("error") if isinstance(output.get("error"), dict) else None,
+    )
+    knowledge["source"] = "workflow_run"
+    knowledge["tags"] = [
+        *[tag for tag in knowledge["tags"] if tag != "workflow_creation"],
+        "workflow_run",
+        "run_memory",
+    ]
+    WorkflowKnowledgeStore(store).append(**knowledge)
+
+
+def evolve(args: argparse.Namespace) -> None:
+    store = WorkflowSkillStore(resolve_db_arg(args))
+    store.initialize()
+    seed_naver_stock_report(store)
+    page_text = Path(args.page_text_file).read_text(encoding="utf-8") if args.page_text_file else ""
+    args.eval_and_evolve = True
+    payload = WorkflowEvolutionRuntime(
+        store,
+        output_dir=args.output_dir,
+        evaluation_loop=build_evaluation_loop(args),
+        cwd=Path(__file__).resolve().parents[1],
+    ).evolve(
+        workflow_name=args.workflow_name,
+        base_version=args.base_version,
+        user_request=args.request,
+        arguments=_workflow_arguments(args, page_text=page_text),
+        max_attempts=args.max_attempts,
+        repair_synthesizer=args.repair_synthesizer,
+        repair_workflow_json_file=args.repair_workflow_json_file,
+        synthesizer_model=args.synthesizer_model,
+    )
+    print(json.dumps(payload, ensure_ascii=False, sort_keys=True))
 
 
 if __name__ == "__main__":

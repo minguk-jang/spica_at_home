@@ -40,7 +40,7 @@ flowchart LR
   Vision --> Report
 ```
 
-- 기본 모드는 text-only라고 가정합니다. `gpt-5.3-codex-spark`는 DOM, locator,
+- 기본 모드는 text-only라고 가정합니다. `gpt-5.5`는 DOM, locator,
   URL, response, ARIA snapshot, action log를 우선 사용합니다.
 - screenshot은 감사용 artifact로 저장합니다. 기본 text model 입력으로 보내지
   않습니다.

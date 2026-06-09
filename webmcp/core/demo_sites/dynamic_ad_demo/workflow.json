@@ -1,0 +1,262 @@
+{
+  "skill_name": "dynamic_ad_review_report",
+  "slug": "dynamic-ad-review-report",
+  "description": "Dismiss a variable sponsored placement, complete a launch review form, and render a short report.",
+  "domain": "localhost",
+  "task_type": "dynamic_browser_action_demo",
+  "body_md": "Demo workflow for scriptless runtime LLM browser actions.",
+  "input_schema": {
+    "start_url": {
+      "type": "string",
+      "required": true
+    }
+  },
+  "output_schema": {
+    "report_text": "string",
+    "status": "string",
+    "page_text": "string",
+    "reviewer_name": "string"
+  },
+  "arguments": [
+    {
+      "name": "start_url",
+      "description": "Initial demo page URL.",
+      "type": "string",
+      "required": true,
+      "default_value": null,
+      "validation": {},
+      "examples": [
+        "http://127.0.0.1:8765/index.html?variant=modal"
+      ],
+      "is_dynamic": true,
+      "order_index": 0
+    }
+  ],
+  "steps": [
+    {
+      "name": "open_dynamic_ad_demo",
+      "description": "Open the local dynamic ad demo page.",
+      "step_type": "goto",
+      "handler_ref": null,
+      "action": {
+        "url_template": "{{start_url}}"
+      },
+      "argument_bindings": {},
+      "assertions": {
+        "url_contains": "127.0.0.1"
+      },
+      "fallback_policy": {
+        "retry": 0
+      },
+      "update_policy": {
+        "record_update_event": true
+      }
+    },
+    {
+      "name": "dismiss_variable_ad",
+      "description": "Close whichever sponsored popup, banner, or panel is visible at runtime.",
+      "step_type": "llm_browser_action",
+      "handler_ref": null,
+      "action": {
+        "instruction": "Close or dismiss the currently visible sponsored popup, promotional banner, or ad panel without leaving the page.",
+        "success_criteria": [
+          "The page status text says Ad dismissed.",
+          "No sponsored popup, promotional banner, or ad panel remains visible."
+        ],
+        "allowed_operations": [
+          "click"
+        ],
+        "timeout_ms": 15000,
+        "settle_ms": 800
+      },
+      "argument_bindings": {},
+      "assertions": {
+        "contains_any": []
+      },
+      "fallback_policy": {
+        "retry": 1
+      },
+      "update_policy": {
+        "record_update_event": true
+      }
+    },
+    {
+      "name": "wait_ad_dismissed",
+      "description": "Wait for the demo page to confirm the ad is dismissed.",
+      "step_type": "wait_for_text",
+      "handler_ref": null,
+      "action": {
+        "source": "page_text"
+      },
+      "argument_bindings": {},
+      "assertions": {
+        "contains_any": [
+          "Ad dismissed"
+        ]
+      },
+      "fallback_policy": {
+        "retry": 0
+      },
+      "update_policy": {
+        "record_update_event": true
+      }
+    },
+    {
+      "name": "open_launch_review",
+      "description": "Open the launch review panel after the ad is dismissed.",
+      "step_type": "click",
+      "handler_ref": null,
+      "action": {
+        "selector": "#begin-review",
+        "settle_ms": 500
+      },
+      "argument_bindings": {},
+      "assertions": {
+        "contains_any": []
+      },
+      "fallback_policy": {
+        "retry": 0
+      },
+      "update_policy": {
+        "record_update_event": true
+      }
+    },
+    {
+      "name": "fill_reviewer_name",
+      "description": "Enter a reviewer name in the launch review form.",
+      "step_type": "fill",
+      "handler_ref": null,
+      "action": {
+        "selector": "#reviewer-name",
+        "value_template": "Mina",
+        "settle_ms": 300
+      },
+      "argument_bindings": {},
+      "assertions": {
+        "contains_any": []
+      },
+      "fallback_policy": {
+        "retry": 0
+      },
+      "update_policy": {
+        "record_update_event": true
+      }
+    },
+    {
+      "name": "approve_copy",
+      "description": "Mark copy as approved.",
+      "step_type": "click",
+      "handler_ref": null,
+      "action": {
+        "selector": "#copy-approved",
+        "settle_ms": 300
+      },
+      "argument_bindings": {},
+      "assertions": {
+        "contains_any": []
+      },
+      "fallback_policy": {
+        "retry": 0
+      },
+      "update_policy": {
+        "record_update_event": true
+      }
+    },
+    {
+      "name": "approve_budget",
+      "description": "Mark budget as approved.",
+      "step_type": "click",
+      "handler_ref": null,
+      "action": {
+        "selector": "#budget-approved",
+        "settle_ms": 300
+      },
+      "argument_bindings": {},
+      "assertions": {
+        "contains_any": []
+      },
+      "fallback_policy": {
+        "retry": 0
+      },
+      "update_policy": {
+        "record_update_event": true
+      }
+    },
+    {
+      "name": "complete_launch_review",
+      "description": "Complete the launch review workflow.",
+      "step_type": "click",
+      "handler_ref": null,
+      "action": {
+        "selector": "#complete-review",
+        "settle_ms": 700
+      },
+      "argument_bindings": {},
+      "assertions": {
+        "contains_any": []
+      },
+      "fallback_policy": {
+        "retry": 0
+      },
+      "update_policy": {
+        "record_update_event": true
+      }
+    },
+    {
+      "name": "wait_launch_review_complete",
+      "description": "Wait until the launch review form reports completion.",
+      "step_type": "wait_for_text",
+      "handler_ref": null,
+      "action": {
+        "source": "page_text"
+      },
+      "argument_bindings": {},
+      "assertions": {
+        "contains_any": [
+          "Launch review complete for Mina"
+        ]
+      },
+      "fallback_policy": {
+        "retry": 0
+      },
+      "update_policy": {
+        "record_update_event": true
+      }
+    },
+    {
+      "name": "render_ad_report",
+      "description": "Render a short Markdown report from the final completed review state.",
+      "step_type": "render_report",
+      "handler_ref": null,
+      "action": {
+        "template_resource": "dynamic_ad_report_markdown"
+      },
+      "argument_bindings": {},
+      "assertions": {
+        "required_output": [
+          "report_text",
+          "page_text"
+        ]
+      },
+      "fallback_policy": {
+        "retry": 0
+      },
+      "update_policy": {
+        "record_update_event": true
+      }
+    }
+  ],
+  "resources": [
+    {
+      "resource_type": "report_template",
+      "name": "dynamic_ad_report_markdown",
+      "description": "Markdown report for the dynamic ad demo.",
+      "content_json": null,
+      "content_text": "# Dynamic Ad Review Report\n\nStatus: {{status}}\n\nFinal URL: {{final_url}}\n\nExpected reviewer: Mina\n\nObserved text:\n\n{{page_text}}\n",
+      "load_when": {
+        "step": "render_ad_report"
+      }
+    }
+  ],
+  "handlers": []
+}

@@ -45,6 +45,10 @@ KRX 06.08. 16:10 장마감
 FIXTURE_PATH = Path(__file__).resolve().parent / "fixtures" / "naver_stock_text.txt"
 
 
+def canonical_json(value: object) -> str:
+    return json.dumps(value, ensure_ascii=False, sort_keys=True)
+
+
 class WorkflowSkillStoreTest(unittest.TestCase):
     def test_seed_creates_skill_like_metadata_and_lazy_version_details(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -68,6 +72,65 @@ class WorkflowSkillStoreTest(unittest.TestCase):
             self.assertGreaterEqual(len(skill.steps), 5)
             self.assertEqual("open_naver_stock_search", skill.steps[0].name)
             self.assertIn("stock_report_markdown", skill.resources)
+
+    def test_seed_restores_distinct_stock_report_examples_for_existing_skill(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = Path(tmp) / "workflow_skills.sqlite"
+            store = WorkflowSkillStore(db_path)
+            store.initialize()
+            seed_naver_stock_report(store)
+
+            with sqlite3.connect(db_path) as conn:
+                skill_id = conn.execute(
+                    "select id from workflow_skills where name = ?",
+                    ("naver_stock_report",),
+                ).fetchone()[0]
+                conn.execute(
+                    "delete from workflow_skill_examples where skill_id = ? and user_request != ?",
+                    (skill_id, "네이버에서 삼성전자 주가 리포트"),
+                )
+                conn.execute(
+                    """
+                    insert into workflow_skill_examples
+                      (skill_id, user_request, normalized_arguments_json, expected_output_summary)
+                    values (?, ?, ?, ?)
+                    """,
+                    (
+                        skill_id,
+                        "네이버에서 삼성전자 주가 리포트 iter duplicate",
+                        canonical_json({"company_name": "삼성전자", "ticker": "005930", "news_limit": 3}),
+                        "Markdown stock report",
+                    ),
+                )
+
+            seed_naver_stock_report(store)
+
+            with sqlite3.connect(db_path) as conn:
+                rows = conn.execute(
+                    """
+                    select normalized_arguments_json
+                    from workflow_skill_examples
+                    where skill_id = ?
+                    """,
+                    (skill_id,),
+                ).fetchall()
+
+            distinct_examples = {
+                canonical_json(json.loads(row[0]))
+                for row in rows
+            }
+            self.assertIn(
+                canonical_json({"company_name": "삼성전자", "ticker": "005930", "news_limit": 3}),
+                distinct_examples,
+            )
+            self.assertIn(
+                canonical_json({"company_name": "SK하이닉스", "ticker": "000660", "news_limit": 3}),
+                distinct_examples,
+            )
+            self.assertIn(
+                canonical_json({"company_name": "NAVER", "ticker": "035420", "news_limit": 3}),
+                distinct_examples,
+            )
 
     def test_executor_runs_seeded_skill_without_llm_and_records_steps(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -132,6 +195,45 @@ class WorkflowSkillStoreTest(unittest.TestCase):
                 )
 
             self.assertIn("company_name", str(ctx.exception))
+
+    def test_executor_marks_run_failed_when_evaluation_loop_crashes(self) -> None:
+        class CrashingEvaluationLoop:
+            def run(self, **_kwargs: object) -> None:
+                raise RuntimeError("browser monitor crashed")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = Path(tmp) / "workflow_skills.sqlite"
+            store = WorkflowSkillStore(db_path)
+            store.initialize()
+            seed_naver_stock_report(store)
+            skill = WorkflowSkillLoader(store).load_skill_by_name("naver_stock_report")
+
+            executor = WorkflowExecutor(
+                store,
+                output_dir=Path(tmp) / "runs",
+                evaluation_loop=CrashingEvaluationLoop(),
+            )
+
+            with self.assertRaisesRegex(RuntimeError, "browser monitor crashed"):
+                executor.run(
+                    skill,
+                    user_request="삼성전자 주가 리포트",
+                    arguments={
+                        "company_name": "삼성전자",
+                        "ticker": "005930",
+                        "page_text": NAVER_STOCK_TEXT,
+                    },
+                )
+
+            with sqlite3.connect(db_path) as conn:
+                conn.row_factory = sqlite3.Row
+                run = conn.execute("select status, output_json, finished_at from workflow_runs").fetchone()
+
+            self.assertEqual("failed", run["status"])
+            self.assertIsNotNone(run["finished_at"])
+            output = json.loads(run["output_json"])
+            self.assertEqual("unexpected_workflow_error", output["error_type"])
+            self.assertEqual("RuntimeError", output["exception_type"])
 
     def test_cli_seeds_and_runs_workflow_skill(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -387,7 +489,7 @@ class WorkflowSkillStoreTest(unittest.TestCase):
             self.assertEqual(1, cold_count)
             self.assertEqual(1, skill_count)
 
-    def test_cli_intelligent_cold_init_defaults_to_spark_model_with_fake_backend(self) -> None:
+    def test_cli_intelligent_cold_init_defaults_to_gpt_55_model_with_fake_backend(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             db_path = Path(tmp) / "workflow_skills.sqlite"
             output_dir = Path(tmp) / "runs"
@@ -420,14 +522,14 @@ class WorkflowSkillStoreTest(unittest.TestCase):
             )
 
             self.assertIn("intelligent_cold_init", completed.stdout)
-            self.assertIn("gpt-5.3-codex-spark", completed.stdout)
+            self.assertIn("gpt-5.5", completed.stdout)
             self.assertTrue((output_dir / "run_삼성전자_report.md").exists())
 
             with sqlite3.connect(db_path) as conn:
                 conn.row_factory = sqlite3.Row
                 synthesis_run = conn.execute("select * from workflow_synthesis_runs").fetchone()
 
-            self.assertEqual("gpt-5.3-codex-spark", synthesis_run["synthesizer_model"])
+            self.assertEqual("gpt-5.5", synthesis_run["synthesizer_model"])
             self.assertEqual(1, synthesis_run["llm_used"])
 
     def test_evolver_creates_new_skill_version_and_update_event(self) -> None:
@@ -513,7 +615,7 @@ class WorkflowSkillStoreTest(unittest.TestCase):
             self.assertIsInstance(cold_run["materialization_duration_ms"], int)
             self.assertIsInstance(cold_run["first_run_duration_ms"], int)
 
-    def test_llm_synthesizer_defaults_to_codex_spark_model(self) -> None:
+    def test_llm_synthesizer_defaults_to_gpt_55_model(self) -> None:
         backend = FakeSynthesisBackend(response=naver_stock_workflow_json())
         synthesizer = LLMWorkflowSynthesizer(backend=backend)
         trace = StaticTraceCollector(page_text=NAVER_STOCK_TEXT).collect(
@@ -524,7 +626,7 @@ class WorkflowSkillStoreTest(unittest.TestCase):
         discovery = synthesizer.synthesize(trace)
 
         self.assertEqual(DEFAULT_CODEX_SYNTHESIS_MODEL, backend.last_model)
-        self.assertEqual("gpt-5.3-codex-spark", synthesizer.model)
+        self.assertEqual("gpt-5.5", synthesizer.model)
         self.assertEqual("llm_fake", discovery.provider)
         self.assertEqual("naver_stock_report", discovery.skill_name)
         self.assertEqual("extract_stock_card", discovery.steps[2]["name"])
@@ -571,7 +673,7 @@ class WorkflowSkillStoreTest(unittest.TestCase):
             self.assertEqual("naver_stock_report", discovery.skill_name)
             self.assertEqual("naver_stock.extract_stock_card", discovery.handlers[0]["name"])
 
-    def test_intelligent_cold_init_uses_llm_synthesizer_and_records_spark_model(self) -> None:
+    def test_intelligent_cold_init_uses_llm_synthesizer_and_records_gpt_55_model(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             db_path = Path(tmp) / "workflow_skills.sqlite"
             output_dir = Path(tmp) / "runs"
@@ -602,7 +704,7 @@ class WorkflowSkillStoreTest(unittest.TestCase):
                 cold_run = conn.execute("select * from cold_init_runs").fetchone()
 
             self.assertEqual("succeeded", synthesis_run["status"])
-            self.assertEqual("gpt-5.3-codex-spark", synthesis_run["synthesizer_model"])
+            self.assertEqual("gpt-5.5", synthesis_run["synthesizer_model"])
             self.assertEqual(1, synthesis_run["llm_used"])
             self.assertIsInstance(synthesis_run["duration_ms"], int)
             self.assertEqual(synthesis_run["id"], cold_run["synthesis_run_id"])
@@ -653,7 +755,7 @@ class WorkflowSkillStoreTest(unittest.TestCase):
                 synthesis_run = conn.execute("select * from workflow_synthesis_runs").fetchone()
 
             self.assertEqual("llm_agent_json", synthesis_run["synthesizer_provider"])
-            self.assertEqual("gpt-5.3-codex-spark", synthesis_run["synthesizer_model"])
+            self.assertEqual("gpt-5.5", synthesis_run["synthesizer_model"])
             self.assertEqual(1, synthesis_run["llm_used"])
 
 

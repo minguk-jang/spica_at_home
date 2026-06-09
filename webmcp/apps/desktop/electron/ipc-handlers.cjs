@@ -42,6 +42,10 @@ function registerWebmcpIpcHandlers({
     };
   });
 
+  ipcMain.handle("webmcp:memory-overview", async (_event, payload) => {
+    return runSidecar(["memory-overview", "--db", payload.dbPath]);
+  });
+
   ipcMain.handle("webmcp:run-versions", async (event, payload) => {
     return withQueueLock("A run queue is already active.", async () => {
       return coreClient.runVersionQueue({ sender: event.sender, payload, headed: false });
@@ -60,12 +64,34 @@ function registerWebmcpIpcHandlers({
   });
 
   ipcMain.handle("webmcp:watch-version", async (event, payload) => {
-    return coreClient.runVersion({
-      sender: event.sender,
-      payload,
-      version: payload.version,
-      headed: true
+    return withQueueLock("A run is already active.", async () => {
+      return coreClient.runVersion({
+        sender: event.sender,
+        payload,
+        version: payload.version,
+        headed: true
+      });
     });
+  });
+
+  ipcMain.handle("webmcp:evolve-workflow", async (event, payload) => {
+    return withQueueLock("A run or evolution job is already active.", async () => {
+      return coreClient.evolveWorkflow({ sender: event.sender, payload });
+    });
+  });
+
+  ipcMain.handle("webmcp:create-workflow", async (event, payload) => {
+    return withQueueLock("A run, creation, or evolution job is already active.", async () => {
+      return coreClient.createWorkflow({ sender: event.sender, payload });
+    });
+  });
+
+  ipcMain.handle("webmcp:pause-current-job", async (event) => {
+    return coreClient.pauseActiveJob({ sender: event.sender });
+  });
+
+  ipcMain.handle("webmcp:resume-current-job", async (event) => {
+    return coreClient.resumeActiveJob({ sender: event.sender });
   });
 
   ipcMain.handle("webmcp:propose-update", async (event, payload) => {
@@ -109,7 +135,7 @@ function createSidecarRunner({ appRoot, sidecarPath, sidecarExists, collectProce
     if (!sidecarExists(bin)) {
       throw new Error(`Rust sidecar is missing. Run npm run sidecar:build. Expected: ${bin}`);
     }
-    const result = await collectProcess(bin, args, { cwd: appRoot });
+    const result = await collectProcess(bin, args, { cwd: appRoot, pausable: false });
     if (result.exitCode !== 0) {
       throw new Error(result.stderr || `sidecar exited with ${result.exitCode}`);
     }

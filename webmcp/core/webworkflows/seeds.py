@@ -1,6 +1,24 @@
 from __future__ import annotations
 
-from webworkflows.storage import WorkflowSkillStore, dumps
+from typing import Any
+
+from webworkflows.storage import WorkflowSkillStore, dumps, loads
+
+
+NAVER_STOCK_REPORT_EXAMPLES = [
+    (
+        "네이버에서 삼성전자 주가 리포트",
+        {"company_name": "삼성전자", "ticker": "005930", "news_limit": 3},
+    ),
+    (
+        "네이버에서 SK하이닉스 주가 리포트",
+        {"company_name": "SK하이닉스", "ticker": "000660", "news_limit": 3},
+    ),
+    (
+        "네이버에서 NAVER 주가 리포트",
+        {"company_name": "NAVER", "ticker": "035420", "news_limit": 3},
+    ),
+]
 
 
 def seed_naver_stock_report(store: WorkflowSkillStore) -> None:
@@ -10,6 +28,7 @@ def seed_naver_stock_report(store: WorkflowSkillStore) -> None:
             ("naver_stock_report",),
         ).fetchone()
         if existing:
+            _ensure_naver_stock_report_examples(conn, int(existing["id"]))
             return
 
         skill_id = conn.execute(
@@ -66,19 +85,7 @@ def seed_naver_stock_report(store: WorkflowSkillStore) -> None:
             (version_id, skill_id),
         )
 
-        examples = [
-            ("네이버에서 삼성전자 주가 검색해서 리포트 써줘", {"company_name": "삼성전자", "ticker": "005930"}),
-            ("SK하이닉스 주가를 네이버에서 찾아서 요약해줘", {"company_name": "SK하이닉스"}),
-        ]
-        for request, args in examples:
-            conn.execute(
-                """
-                insert into workflow_skill_examples
-                  (skill_id, user_request, normalized_arguments_json, expected_output_summary)
-                values (?, ?, ?, ?)
-                """,
-                (skill_id, request, dumps(args), "Markdown stock report"),
-            )
+        _ensure_naver_stock_report_examples(conn, int(skill_id))
 
         arguments = [
             ("company_name", "검색할 기업명", "string", True, None, {"min_length": 1}, ["삼성전자"], True),
@@ -222,3 +229,40 @@ def seed_naver_stock_report(store: WorkflowSkillStore) -> None:
                 dumps(["naver.com"]),
             ),
         )
+
+
+def _ensure_naver_stock_report_examples(conn, skill_id: int) -> None:
+    existing_keys = set()
+    for row in conn.execute(
+        """
+        select normalized_arguments_json
+        from workflow_skill_examples
+        where skill_id = ?
+        """,
+        (skill_id,),
+    ):
+        args = loads(row["normalized_arguments_json"], {})
+        if isinstance(args, dict):
+            existing_keys.add(_stock_example_key(args))
+
+    for request, args in NAVER_STOCK_REPORT_EXAMPLES:
+        key = _stock_example_key(args)
+        if key in existing_keys:
+            continue
+        conn.execute(
+            """
+            insert into workflow_skill_examples
+              (skill_id, user_request, normalized_arguments_json, expected_output_summary)
+            values (?, ?, ?, ?)
+            """,
+            (skill_id, request, dumps(args), "Markdown stock report"),
+        )
+        existing_keys.add(key)
+
+
+def _stock_example_key(args: dict[str, Any]) -> str:
+    company_name = args.get("company_name") or args.get("companyName") or ""
+    ticker = args.get("ticker") or ""
+    if company_name or ticker:
+        return f"{company_name}\0{ticker}"
+    return dumps(args)

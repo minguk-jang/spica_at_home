@@ -7,6 +7,7 @@ import time
 from dataclasses import dataclass, replace
 from typing import Any, Protocol
 
+from webworkflows.eval_loop import EvalAndEvolveLoop
 from webworkflows.executor import WorkflowExecutor, WorkflowRunResult
 from webworkflows.loader import WorkflowSkill, WorkflowSkillLoader
 from webworkflows.cold_init_types import ArtifactTrace
@@ -325,11 +326,17 @@ class WorkflowMaterializer:
     def __init__(self, store: WorkflowSkillStore):
         self.store = store
 
-    def materialize(self, discovery: DiscoveryResult) -> tuple[int, int]:
+    def materialize(
+        self,
+        discovery: DiscoveryResult,
+        *,
+        skill_status: str = "stable",
+        version_status: str = "stable",
+    ) -> tuple[int, int]:
         with self.store.connect() as conn:
             existing = conn.execute(
-                "select id, latest_version_id from workflow_skills where name = ?",
-                (discovery.skill_name,),
+                "select id, latest_version_id from workflow_skills where name = ? or slug = ?",
+                (discovery.skill_name, discovery.slug),
             ).fetchone()
             if existing:
                 return int(existing["id"]), int(existing["latest_version_id"])
@@ -347,7 +354,7 @@ class WorkflowMaterializer:
                         discovery.description,
                         discovery.domain,
                         discovery.task_type,
-                        "stable",
+                        skill_status,
                     ),
                 ).lastrowid
             )
@@ -367,7 +374,7 @@ class WorkflowMaterializer:
                         dumps(discovery.output_schema),
                         discovery.body_md,
                         dumps({"metadata_first": True, "lazy_load_steps": True}),
-                        "stable",
+                        version_status,
                     ),
                 ).lastrowid
             )
@@ -487,10 +494,12 @@ class ColdInitRunner:
         *,
         output_dir,
         discovery_runner: DiscoveryRunner,
+        evaluation_loop: EvalAndEvolveLoop | None = None,
     ):
         self.store = store
         self.output_dir = output_dir
         self.discovery_runner = discovery_runner
+        self.evaluation_loop = evaluation_loop
 
     def run(self, *, user_request: str, arguments: dict[str, Any]) -> ColdInitResult:
         cold_init_run_id = self._create_cold_init_run(user_request, arguments)
@@ -506,7 +515,7 @@ class ColdInitRunner:
             skill = WorkflowSkillLoader(self.store).load_skill(skill_id)
             first_run_arguments = dict(arguments)
             first_run_arguments.setdefault("page_text", discovery.page_text)
-            run_result = WorkflowExecutor(self.store, output_dir=self.output_dir).run(
+            run_result = WorkflowExecutor(self.store, output_dir=self.output_dir, evaluation_loop=self.evaluation_loop).run(
                 skill,
                 user_request=user_request,
                 arguments=first_run_arguments,
@@ -612,11 +621,13 @@ class IntelligentColdInitRunner:
         output_dir,
         trace_collector: TraceCollector,
         synthesizer: WorkflowSynthesizer,
+        evaluation_loop: EvalAndEvolveLoop | None = None,
     ):
         self.store = store
         self.output_dir = output_dir
         self.trace_collector = trace_collector
         self.synthesizer = synthesizer
+        self.evaluation_loop = evaluation_loop
 
     def run(self, *, user_request: str, arguments: dict[str, Any]) -> IntelligentColdInitResult:
         cold_init_run_id = self._create_cold_init_run(user_request, arguments)
@@ -650,7 +661,7 @@ class IntelligentColdInitRunner:
             skill = WorkflowSkillLoader(self.store).load_skill(skill_id)
             first_run_arguments = dict(arguments)
             first_run_arguments.setdefault("page_text", trace.page_text)
-            run_result = WorkflowExecutor(self.store, output_dir=self.output_dir).run(
+            run_result = WorkflowExecutor(self.store, output_dir=self.output_dir, evaluation_loop=self.evaluation_loop).run(
                 skill,
                 user_request=user_request,
                 arguments=first_run_arguments,

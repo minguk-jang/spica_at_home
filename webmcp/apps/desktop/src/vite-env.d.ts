@@ -145,6 +145,16 @@ export type WorkflowUpdateProposal = {
   updatedAt: string;
 };
 
+export type WorkflowExample = {
+  id: number;
+  skillId: number;
+  userRequest: string;
+  normalizedArguments: unknown;
+  expectedOutputSummary: string;
+  successCount: number;
+  lastUsedAt: string | null;
+};
+
 export type WorkflowDetail = {
   workflow: WorkflowCard;
   versions: WorkflowVersion[];
@@ -155,7 +165,44 @@ export type WorkflowDetail = {
   runs: WorkflowRun[];
   stepRuns: StepRun[];
   updateEvents: UpdateEvent[];
+  examples: WorkflowExample[];
   proposals: WorkflowUpdateProposal[];
+};
+
+export type PageAnalysisMemory = {
+  id: number;
+  urlKey: string;
+  canonicalUrl: string;
+  originalUrl: string;
+  title: string | null;
+  frameworkHints: unknown;
+  frameHints: unknown;
+  locatorHints: unknown;
+  analysis: unknown;
+  evidence: unknown;
+  source: string;
+  observationCount: number;
+  createdAt: string;
+  updatedAt: string;
+  lastSeenAt: string;
+};
+
+export type WorkflowKnowledgeMemory = {
+  id: number;
+  category: string;
+  summary: string;
+  content: unknown;
+  source: string;
+  confidence: number;
+  tags: unknown;
+  createdAt: string;
+};
+
+export type MemoryOverview = {
+  pageAnalyses: PageAnalysisMemory[];
+  knowledgeEntries: WorkflowKnowledgeMemory[];
+  pageAnalysisCount: number;
+  knowledgeEntryCount: number;
 };
 
 export type DefaultPaths = {
@@ -176,9 +223,13 @@ export type RunPayload = {
   version?: number;
   headed?: boolean;
   request: string;
-  companyName: string;
+  companyName?: string;
   ticker?: string;
-  newsLimit: number;
+  newsLimit?: number;
+  extraArguments?: Record<string, unknown>;
+  evalAndEvolve?: boolean;
+  vlmEvaluator?: "codex";
+  evalBrowser?: "chromium" | "firefox" | "webkit";
 };
 
 export type UpdateProposalPayload = {
@@ -195,6 +246,41 @@ export type UpdateProposalPayload = {
   synthesizerModel: string;
   workflowJsonFile?: string;
   headed?: boolean;
+};
+
+export type EvolveWorkflowPayload = {
+  dbPath: string;
+  repoRoot: string;
+  outputDir: string;
+  pythonPath?: string;
+  workflowName: string;
+  baseVersion: number;
+  request: string;
+  companyName?: string;
+  ticker?: string;
+  newsLimit?: number;
+  extraArguments?: Record<string, unknown>;
+  maxAttempts?: number;
+  repairSynthesizer?: "agent-json" | "fake-copy" | "codex";
+  repairWorkflowJsonFile?: string;
+  synthesizerModel?: string;
+  headed?: boolean;
+  vlmEvaluator?: "codex";
+  evalBrowser?: "chromium" | "firefox" | "webkit";
+};
+
+export type CreateWorkflowPayload = {
+  dbPath: string;
+  repoRoot: string;
+  outputDir: string;
+  pythonPath?: string;
+  startUrl: string;
+  task: string;
+  finalState: string;
+  maxAttempts?: number;
+  headed?: boolean;
+  synthesizerModel?: string;
+  evalBrowser?: "chromium" | "firefox" | "webkit";
 };
 
 export type ApplyProposalPayload = {
@@ -230,9 +316,14 @@ declare global {
       getDefaultPaths: () => Promise<DefaultPaths>;
       listWorkflows: (dbPath: string) => Promise<WorkflowCard[]>;
       getWorkflowDetail: (dbPath: string, workflowId: number, repoRoot?: string) => Promise<WorkflowDetail>;
+      getMemoryOverview: (dbPath: string) => Promise<MemoryOverview>;
       runVersion: (payload: RunPayload) => Promise<unknown>;
       runVersions: (payload: RunPayload) => Promise<unknown[]>;
       watchVersion: (payload: RunPayload) => Promise<unknown>;
+      evolveWorkflow: (payload: EvolveWorkflowPayload) => Promise<unknown>;
+      createWorkflow: (payload: CreateWorkflowPayload) => Promise<unknown>;
+      pauseCurrentJob: () => Promise<unknown>;
+      resumeCurrentJob: () => Promise<unknown>;
       proposeUpdate: (payload: UpdateProposalPayload) => Promise<unknown>;
       applyProposal: (payload: ApplyProposalPayload) => Promise<unknown>;
       openPath: (targetPath: string) => Promise<string>;

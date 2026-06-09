@@ -105,7 +105,26 @@ npm run dev
 Desktop 기본 DB:
 
 ```text
-webmcp/core/outputs/webmcp_plugin_cold_iter_check/workflows.sqlite
+~/.webmcp-studio/db/workflows.sqlite
+```
+
+다른 위치가 필요하면 `WEBMCP_STUDIO_DB_PATH`를 지정합니다.
+
+Reviewed workflow memory fixture를 persistent DB에 동기화:
+
+```bash
+npm run db:sync-memory
+```
+
+이 명령은 `core/fixtures/workflow-memory/*.jsonl`의 `workflow_example`,
+`page_analysis`, `knowledge` 레코드를 `~/.webmcp-studio/db/workflows.sqlite`에
+idempotent upsert합니다. `WEBMCP_STUDIO_DB_PATH`를 지정하면 같은 명령이 해당 DB를
+사용합니다.
+
+```bash
+npm run db:sync-memory:dry
+npm run db:sync-examples
+npm run db:sync-naver
 ```
 
 ## 문서 지도

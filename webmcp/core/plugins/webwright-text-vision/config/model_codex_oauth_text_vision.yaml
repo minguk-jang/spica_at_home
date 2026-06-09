@@ -10,7 +10,7 @@
 
 model:
   model_class: codex_cli
-  model_name: gpt-5.3-codex-spark
+  model_name: gpt-5.5
   codex_sandbox: workspace-write
   request_timeout_seconds: 300
   attach_observation_screenshot: false

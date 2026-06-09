@@ -12,7 +12,7 @@
 
 model:
   model_class: openai
-  model_name: gpt-5.3-codex-spark
+  model_name: gpt-5.5
   openai_endpoint: https://api.openai.com/v1/responses
   openai_api_key: ""
   attach_observation_screenshot: false

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sqlite3
 from pathlib import Path
 from typing import Any, Iterable
@@ -14,6 +15,27 @@ def loads(value: str | None, default: Any = None) -> Any:
     if value is None:
         return default
     return json.loads(value)
+
+
+def default_studio_db_path(
+    *,
+    home_dir: str | Path | None = None,
+    env: dict[str, str] | None = None,
+) -> Path:
+    environment = os.environ if env is None else env
+    home = Path(home_dir) if home_dir is not None else Path.home()
+    override = environment.get("WEBMCP_STUDIO_DB_PATH")
+    if override:
+        return _expand_home_path(override, home)
+    return home / ".webmcp-studio" / "db" / "workflows.sqlite"
+
+
+def _expand_home_path(target_path: str, home_dir: Path) -> Path:
+    if target_path == "~":
+        return home_dir
+    if target_path.startswith("~/"):
+        return home_dir / target_path[2:]
+    return Path(target_path)
 
 
 class WorkflowSkillStore:
@@ -241,6 +263,152 @@ class WorkflowSkillStore:
                     created_at text not null default current_timestamp,
                     updated_at text not null default current_timestamp
                 );
+
+                create table if not exists workflow_creation_sessions (
+                    id integer primary key autoincrement,
+                    start_url text not null,
+                    user_task text not null,
+                    final_state_description text not null,
+                    input_json text not null,
+                    status text not null,
+                    max_attempts integer not null,
+                    output_dir text not null,
+                    created_skill_id integer references workflow_skills(id),
+                    created_version_id integer references workflow_skill_versions(id),
+                    workflow_run_id integer references workflow_runs(id),
+                    error_json text,
+                    started_at text not null default current_timestamp,
+                    finished_at text,
+                    duration_ms integer
+                );
+
+                create table if not exists workflow_creation_attempts (
+                    id integer primary key autoincrement,
+                    session_id integer not null references workflow_creation_sessions(id) on delete cascade,
+                    attempt_index integer not null,
+                    discovery_provider text not null,
+                    synthesis_provider text,
+                    synthesis_model text,
+                    workflow_json text,
+                    workflow_run_id integer references workflow_runs(id),
+                    evaluation_json text,
+                    status text not null,
+                    discovery_duration_ms integer,
+                    synthesis_duration_ms integer,
+                    materialization_duration_ms integer,
+                    first_run_duration_ms integer,
+                    error_json text,
+                    started_at text not null default current_timestamp,
+                    finished_at text,
+                    unique(session_id, attempt_index)
+                );
+
+                create table if not exists workflow_creation_artifacts (
+                    id integer primary key autoincrement,
+                    session_id integer not null references workflow_creation_sessions(id) on delete cascade,
+                    attempt_id integer references workflow_creation_attempts(id) on delete set null,
+                    artifact_type text not null,
+                    path text not null,
+                    metadata_json text not null,
+                    created_at text not null default current_timestamp
+                );
+
+                create table if not exists evolution_sessions (
+                    id integer primary key autoincrement,
+                    skill_id integer references workflow_skills(id) on delete set null,
+                    workflow_name text not null,
+                    base_version integer not null,
+                    user_request text not null,
+                    input_json text not null,
+                    status text not null,
+                    max_attempts integer not null,
+                    output_dir text not null,
+                    final_version integer,
+                    final_version_id integer references workflow_skill_versions(id),
+                    final_run_id integer references workflow_runs(id),
+                    error_json text,
+                    started_at text not null default current_timestamp,
+                    finished_at text,
+                    duration_ms integer
+                );
+
+                create table if not exists evolution_attempts (
+                    id integer primary key autoincrement,
+                    session_id integer not null references evolution_sessions(id) on delete cascade,
+                    attempt_index integer not null,
+                    version integer not null,
+                    version_id integer not null references workflow_skill_versions(id),
+                    workflow_run_id integer references workflow_runs(id),
+                    status text not null,
+                    evaluation_json text,
+                    repair_request_id integer references repair_requests(id),
+                    repair_response_id integer references repair_responses(id),
+                    applied_proposal_id integer references workflow_update_proposals(id),
+                    applied_version_id integer references workflow_skill_versions(id),
+                    error_json text,
+                    started_at text not null default current_timestamp,
+                    finished_at text,
+                    duration_ms integer,
+                    unique(session_id, attempt_index)
+                );
+
+                create table if not exists repair_requests (
+                    id integer primary key autoincrement,
+                    session_id integer not null references evolution_sessions(id) on delete cascade,
+                    attempt_id integer references evolution_attempts(id) on delete set null,
+                    skill_id integer not null references workflow_skills(id) on delete cascade,
+                    base_version_id integer not null references workflow_skill_versions(id),
+                    workflow_run_id integer references workflow_runs(id),
+                    status text not null,
+                    request_json text not null,
+                    request_path text not null,
+                    created_at text not null default current_timestamp
+                );
+
+                create table if not exists repair_responses (
+                    id integer primary key autoincrement,
+                    repair_request_id integer not null references repair_requests(id) on delete cascade,
+                    proposal_id integer references workflow_update_proposals(id),
+                    applied_version_id integer references workflow_skill_versions(id),
+                    status text not null,
+                    response_json text not null,
+                    response_path text not null,
+                    created_at text not null default current_timestamp
+                );
+
+                create table if not exists page_analyses (
+                    id integer primary key autoincrement,
+                    url_key text not null unique,
+                    canonical_url text not null,
+                    original_url text not null,
+                    title text,
+                    framework_hints_json text not null,
+                    frame_hints_json text not null,
+                    locator_hints_json text not null,
+                    analysis_json text not null,
+                    evidence_json text not null,
+                    source text not null,
+                    observation_count integer not null default 1,
+                    created_at text not null default current_timestamp,
+                    updated_at text not null default current_timestamp,
+                    last_seen_at text not null default current_timestamp
+                );
+
+                create table if not exists workflow_knowledge_entries (
+                    id integer primary key autoincrement,
+                    category text not null,
+                    summary text not null,
+                    content_json text not null,
+                    source text not null,
+                    confidence real not null,
+                    tags_json text not null,
+                    created_at text not null default current_timestamp
+                );
+
+                create index if not exists idx_page_analyses_url_key
+                    on page_analyses(url_key);
+                create index if not exists idx_workflow_knowledge_category_created
+                    on workflow_knowledge_entries(category, created_at);
                 """
             )
             _ensure_column(conn, "workflow_runs", "duration_ms", "integer")

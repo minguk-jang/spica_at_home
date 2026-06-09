@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 import subprocess
 import tempfile
 from dataclasses import dataclass
@@ -8,9 +9,10 @@ from pathlib import Path
 from typing import Any, Protocol
 
 from webworkflows.cold_init_types import ArtifactTrace
+from webworkflows.dynamic_browser import DYNAMIC_BROWSER_ACTION_STEP_TYPE, validate_dynamic_step_action
 
 
-DEFAULT_CODEX_SYNTHESIS_MODEL = "gpt-5.3-codex-spark"
+DEFAULT_CODEX_SYNTHESIS_MODEL = "gpt-5.5"
 
 
 class SynthesisBackend(Protocol):
@@ -63,15 +65,21 @@ class AgentJsonSynthesisBackend:
 class CodexCliSynthesisBackend:
     provider = "codex_cli"
 
-    def __init__(self, *, cwd: str | Path | None = None, timeout_seconds: int = 300):
+    def __init__(
+        self,
+        *,
+        cwd: str | Path | None = None,
+        timeout_seconds: int = 300,
+        run_command=subprocess.run,
+    ):
         self.cwd = Path(cwd) if cwd else None
         self.timeout_seconds = timeout_seconds
+        self.run_command = run_command
 
     def synthesize(self, *, prompt: str, schema: dict[str, Any], model: str) -> dict[str, Any]:
         with tempfile.TemporaryDirectory() as tmp:
-            schema_path = Path(tmp) / "workflow_schema.json"
             output_path = Path(tmp) / "workflow_output.json"
-            schema_path.write_text(json.dumps(schema, ensure_ascii=False), encoding="utf-8")
+            prompt_with_schema = _prompt_with_schema(prompt, schema)
             command = [
                 "codex",
                 "exec",
@@ -82,14 +90,12 @@ class CodexCliSynthesisBackend:
                 "--ignore-user-config",
                 "--sandbox",
                 "read-only",
-                "--output-schema",
-                str(schema_path),
                 "--output-last-message",
                 str(output_path),
-                prompt,
+                prompt_with_schema,
             ]
             try:
-                completed = subprocess.run(
+                completed = self.run_command(
                     command,
                     cwd=str(self.cwd) if self.cwd else None,
                     text=True,
@@ -129,6 +135,15 @@ class LLMWorkflowSynthesizer:
         return f"llm_{self.backend.provider}"
 
     def synthesize_json(self, trace: ArtifactTrace) -> SynthesisResult:
+        known_workflow = known_workflow_json_for_trace(trace)
+        if known_workflow:
+            validate_workflow_json(known_workflow)
+            return SynthesisResult(
+                provider=str(known_workflow.get("_synthesis_provider") or "known_workflow"),
+                model=self.model,
+                workflow_json=_without_private_keys(known_workflow),
+            )
+
         prompt = build_synthesis_prompt(trace)
         workflow_json = self.backend.synthesize(
             prompt=prompt,
@@ -147,27 +162,53 @@ class LLMWorkflowSynthesizer:
 
 
 def build_synthesis_prompt(trace: ArtifactTrace) -> str:
+    page_analysis_context_json = json.dumps(
+        trace.page_analysis_context or {},
+        ensure_ascii=False,
+        sort_keys=True,
+    )
+    knowledge_context_json = json.dumps(
+        trace.knowledge_context or [],
+        ensure_ascii=False,
+        sort_keys=True,
+    )
     return (
-        "You are synthesizing a reusable WebMCP workflow JSON for a deterministic browser workflow.\n"
+        "You are synthesizing a reusable WebMCP workflow JSON for a browser workflow.\n"
         "Return only JSON matching the provided schema. Do not include Python code.\n"
         "Use repo handler refs only when suitable; for Naver stock extraction use "
         "`naver_stock.extract_stock_card`.\n\n"
         "Required top-level keys: skill_name, slug, description, domain, task_type, body_md, "
         "input_schema, output_schema, arguments, steps, resources, handlers.\n"
-        "Allowed step_type values: goto, wait_for_text, run_handler, assert_output, render_report.\n"
+        "Allowed step_type values: goto, click, click_text, fill, press, select_suggestion, "
+        "llm_browser_action, wait_for_text, run_handler, assert_output, render_report.\n"
         "Each step must include: name, description, step_type, handler_ref, action, "
         "argument_bindings, assertions, fallback_policy, update_policy.\n"
         "Because the schema is strict, include unused fields as null, empty arrays, or empty objects "
         "instead of omitting them.\n"
-        "Use double-brace placeholders exactly like {{company_name}} and {{ticker}}.\n"
-        "Do not invent executable code. Store templates, handler refs, assertions, and static JSON only.\n\n"
+        "Use double-brace placeholders for dynamic values, for example {{start_url}} or {{company_name}}.\n"
+        "Infer arguments from the user task and final state. Do not add stock-specific arguments "
+        "such as company_name or ticker unless the requested task is actually a stock workflow.\n"
+        "When no repo handler exists for extraction, prefer a deterministic workflow with goto, "
+        "wait_for_text, and render_report steps. Do not invent new handler modules or functions.\n"
+        "For variable browser work such as closing ads/popups/modals, selecting UI that changes per run, or "
+        "handling unstable page chrome, use `llm_browser_action`. Store only action.instruction, "
+        "action.success_criteria, action.allowed_operations, and action.timeout_ms. Do not store generated JavaScript, "
+        "Python, Playwright code, script, or selectors produced by the runtime LLM in the workflow JSON; that code is "
+        "generated at runtime only.\n"
+        "Do not invent executable code. Store templates, handler refs, assertions, dynamic instructions, and static JSON only.\n\n"
         "For a Naver stock report, prefer these semantic steps: open_naver_stock_search, "
         "wait_stock_card, extract_stock_card, validate_stock_output, render_stock_report.\n\n"
         f"User request: {trace.user_request}\n"
         f"Arguments JSON: {json.dumps(trace.arguments, ensure_ascii=False, sort_keys=True)}\n"
+        f"Start URL: {trace.arguments.get('start_url', '')}\n"
+        f"Expected final browser state: {trace.arguments.get('final_state', '')}\n"
         f"Discovery provider: {trace.provider}\n"
         f"Final URL: {trace.final_url or ''}\n"
         f"Page title: {trace.title or ''}\n"
+        "Reusable page analysis context JSON:\n"
+        f"{page_analysis_context_json[:3000]}\n"
+        "Reusable script generation knowledge JSON:\n"
+        f"{knowledge_context_json[:3000]}\n"
         "Page text excerpt:\n"
         f"{trace.page_text[:6000]}\n"
     )
@@ -193,7 +234,19 @@ def validate_workflow_json(workflow: dict[str, Any]) -> None:
             raise ValueError(f"workflow JSON missing required key: {key}")
     if not isinstance(workflow["steps"], list) or not workflow["steps"]:
         raise ValueError("workflow JSON requires at least one step")
-    allowed_step_types = {"goto", "wait_for_text", "run_handler", "assert_output", "render_report"}
+    allowed_step_types = {
+        "goto",
+        "click",
+        "click_text",
+        "fill",
+        "press",
+        "select_suggestion",
+        "wait_for_text",
+        "run_handler",
+        "assert_output",
+        "render_report",
+    }
+    allowed_step_types.add(DYNAMIC_BROWSER_ACTION_STEP_TYPE)
     for step in workflow["steps"]:
         for key in ["name", "description", "step_type", "action", "assertions"]:
             if key not in step:
@@ -202,6 +255,8 @@ def validate_workflow_json(workflow: dict[str, Any]) -> None:
             raise ValueError(f"unsupported synthesized step_type: {step['step_type']}")
         if step["step_type"] == "run_handler" and not step.get("handler_ref"):
             raise ValueError(f"run_handler step missing handler_ref: {step['name']}")
+        if step["step_type"] == DYNAMIC_BROWSER_ACTION_STEP_TYPE:
+            validate_dynamic_step_action(step.get("action") or {}, step_name=str(step.get("name") or "unknown"))
 
 
 def bind_known_handlers(workflow: dict[str, Any]) -> dict[str, Any]:
@@ -220,6 +275,13 @@ def bind_known_handlers(workflow: dict[str, Any]) -> dict[str, Any]:
             if handler.get("name") not in {"extract_stock_card", "naver_stock.extract_stock_card"}
         ]
         handlers.append(_known_naver_stock_handler())
+    if "naver_map.extract_subway_duration" in handler_refs:
+        handlers = [
+            handler
+            for handler in handlers
+            if handler.get("name") not in {"extract_subway_duration", "naver_map.extract_subway_duration"}
+        ]
+        handlers.append(_known_naver_map_handler())
 
     normalized["handlers"] = handlers
     return normalized
@@ -234,6 +296,228 @@ def _known_naver_stock_handler() -> dict[str, Any]:
         "input_schema": {"page_text": "string", "company_name": "string", "ticker": "string"},
         "output_schema": {"company_name": "string", "current_price": "string"},
         "allowed_domains": ["naver.com", "search.naver.com", "finance.naver.com"],
+    }
+
+
+def _known_naver_map_handler() -> dict[str, Any]:
+    return {
+        "name": "naver_map.extract_subway_duration",
+        "description": "Extract a subway route duration from Naver Map transit results.",
+        "module": "webworkflows.handlers.naver_map",
+        "function": "extract_subway_duration",
+        "input_schema": {"page_text": "string", "start_station": "string", "end_station": "string"},
+        "output_schema": {"duration_text": "string", "duration_minutes": "integer", "route_summary": "string"},
+        "allowed_domains": ["naver.com", "map.naver.com"],
+    }
+
+
+def known_workflow_json_for_trace(trace: ArtifactTrace) -> dict[str, Any] | None:
+    if not _looks_like_naver_map_route(trace):
+        return None
+    start_station, end_station = _station_pair(trace)
+    if not start_station or not end_station:
+        return None
+    return naver_map_transit_route_workflow_json(
+        start_station=start_station,
+        end_station=end_station,
+        start_url=str(trace.arguments.get("start_url") or "https://www.naver.com"),
+    )
+
+
+def naver_map_transit_route_workflow_json(
+    *,
+    start_station: str = "양재역",
+    end_station: str = "사당역",
+    start_url: str = "https://www.naver.com",
+) -> dict[str, Any]:
+    return {
+        "_synthesis_provider": "known_naver_map_route",
+        "skill_name": "naver_map_transit_route",
+        "slug": "naver-map-transit-route",
+        "description": "네이버 지도에서 출발역과 도착역 사이의 지하철 대중교통 소요 시간을 검색하고 요약한다.",
+        "domain": "map.naver.com",
+        "task_type": "transit_route_duration",
+        "body_md": "Deterministic browser workflow for Naver Map subway transit route duration.",
+        "input_schema": {
+            "start_station": {"type": "string", "required": True},
+            "end_station": {"type": "string", "required": True},
+            "start_url": {"type": "string", "required": False, "default": start_url},
+            "page_text": {"type": "string", "required": False},
+        },
+        "output_schema": {
+            "start_station": "string",
+            "end_station": "string",
+            "duration_text": "string",
+            "duration_minutes": "integer",
+            "route_summary": "string",
+            "report_text": "string",
+        },
+        "arguments": [
+            _argument("start_station", "출발 지하철역", "string", True, None, {"min_length": 1}, [start_station], True, 0),
+            _argument("end_station", "도착 지하철역", "string", True, None, {"min_length": 1}, [end_station], True, 1),
+            _argument("start_url", "네이버 시작 URL", "string", False, start_url, {}, [start_url], False, 2),
+            _argument("page_text", "브라우저 평가 또는 캐시 실행에 사용할 페이지 전체 텍스트", "string", False, None, {}, [], True, 3),
+        ],
+        "steps": [
+            {
+                "name": "open_naver_home",
+                "description": "Open the requested Naver start page.",
+                "step_type": "goto",
+                "handler_ref": None,
+                "action": {"url_template": "{{start_url}}"},
+                "argument_bindings": {},
+                "assertions": {"url_contains": "naver.com"},
+                "fallback_policy": {"retry": 0},
+                "update_policy": {"record_update_event": True},
+            },
+            {
+                "name": "open_naver_map_directions",
+                "description": "Open Naver Map's public transit direction panel.",
+                "step_type": "goto",
+                "handler_ref": None,
+                "action": {"url_template": "https://map.naver.com/p/directions/-/-/-/transit?c=15.00,0,0,0,dh"},
+                "argument_bindings": {},
+                "assertions": {"url_contains": "map.naver.com"},
+                "fallback_policy": {"retry": 0},
+                "update_policy": {"record_update_event": True},
+            },
+            {
+                "name": "wait_direction_form",
+                "description": "Wait until the route form is visible.",
+                "step_type": "wait_for_text",
+                "handler_ref": None,
+                "action": {"source": "page_text"},
+                "argument_bindings": {},
+                "assertions": {"contains_any": ["출발지 입력", "도착지 입력", "대중교통"]},
+                "fallback_policy": {"retry": 1},
+                "update_policy": {"record_update_event": True},
+            },
+            {
+                "name": "fill_start_station",
+                "description": "Enter the start station.",
+                "step_type": "fill",
+                "handler_ref": None,
+                "action": {"selector": "input.input_search", "nth": 0, "value_template": "{{start_station}}"},
+                "argument_bindings": {},
+                "assertions": {},
+                "fallback_policy": {"retry": 1},
+                "update_policy": {"record_update_event": True},
+            },
+            {
+                "name": "select_start_station",
+                "description": "Select the station autocomplete result for the start station.",
+                "step_type": "select_suggestion",
+                "handler_ref": None,
+                "action": {"markers": ["지하철,전철", "{{start_station}}"], "candidate_selector": "button,a,li,div"},
+                "argument_bindings": {},
+                "assertions": {},
+                "fallback_policy": {"retry": 1},
+                "update_policy": {"record_update_event": True},
+            },
+            {
+                "name": "fill_end_station",
+                "description": "Enter the end station.",
+                "step_type": "fill",
+                "handler_ref": None,
+                "action": {"selector": "input.input_search", "nth": 1, "value_template": "{{end_station}}"},
+                "argument_bindings": {},
+                "assertions": {},
+                "fallback_policy": {"retry": 1},
+                "update_policy": {"record_update_event": True},
+            },
+            {
+                "name": "select_end_station",
+                "description": "Select the station autocomplete result for the end station.",
+                "step_type": "select_suggestion",
+                "handler_ref": None,
+                "action": {"markers": ["지하철,전철", "{{end_station}}"], "candidate_selector": "button,a,li,div"},
+                "argument_bindings": {},
+                "assertions": {},
+                "fallback_policy": {"retry": 1},
+                "update_policy": {"record_update_event": True},
+            },
+            {
+                "name": "submit_route_search",
+                "description": "Run the route search.",
+                "step_type": "click",
+                "handler_ref": None,
+                "action": {"selector": "button.btn_direction.search", "nth": 0},
+                "argument_bindings": {},
+                "assertions": {},
+                "fallback_policy": {"retry": 1},
+                "update_policy": {"record_update_event": True},
+            },
+            {
+                "name": "wait_route_results",
+                "description": "Wait for route duration results.",
+                "step_type": "wait_for_text",
+                "handler_ref": None,
+                "action": {"source": "page_text"},
+                "argument_bindings": {},
+                "assertions": {"contains_any": ["지하철", "{{end_station}}", "분"]},
+                "fallback_policy": {"retry": 1},
+                "update_policy": {"record_update_event": True},
+            },
+            {
+                "name": "extract_subway_duration",
+                "description": "Extract the subway route duration from Naver Map result text.",
+                "step_type": "run_handler",
+                "handler_ref": "naver_map.extract_subway_duration",
+                "action": {
+                    "inputs": {
+                        "page_text": "{{page_text}}",
+                        "start_station": "{{start_station}}",
+                        "end_station": "{{end_station}}",
+                    }
+                },
+                "argument_bindings": {},
+                "assertions": {"required_output": ["duration_text", "duration_minutes", "route_summary"]},
+                "fallback_policy": {"retry": 0},
+                "update_policy": {"record_update_event": True},
+            },
+            {
+                "name": "validate_route_output",
+                "description": "Validate that the route output matches the requested stations.",
+                "step_type": "assert_output",
+                "handler_ref": None,
+                "action": {},
+                "argument_bindings": {},
+                "assertions": {
+                    "equals": {"start_station": "{{start_station}}", "end_station": "{{end_station}}"},
+                    "required_output": ["duration_text", "duration_minutes"],
+                },
+                "fallback_policy": {"retry": 0},
+                "update_policy": {"record_update_event": True},
+            },
+            {
+                "name": "render_route_report",
+                "description": "Render a Markdown route summary.",
+                "step_type": "render_report",
+                "handler_ref": None,
+                "action": {"template_resource": "route_report_markdown"},
+                "argument_bindings": {},
+                "assertions": {"required_output": ["report_text"]},
+                "fallback_policy": {"retry": 0},
+                "update_policy": {"record_update_event": True},
+            },
+        ],
+        "resources": [
+            {
+                "resource_type": "report_template",
+                "name": "route_report_markdown",
+                "description": "Markdown template for a Naver Map route duration report.",
+                "content_json": None,
+                "content_text": (
+                    "# 네이버 지도 지하철 경로\n\n"
+                    "- 출발: {{start_station}}\n"
+                    "- 도착: {{end_station}}\n"
+                    "- 소요 시간: {{duration_text}}\n\n"
+                    "{{route_summary}}\n"
+                ),
+                "load_when": {"step": "render_route_report"},
+            }
+        ],
+        "handlers": [_known_naver_map_handler()],
     }
 
 
@@ -389,35 +673,20 @@ WORKFLOW_JSON_SCHEMA: dict[str, Any] = {
         "body_md": {"type": "string"},
         "input_schema": {
             "type": "object",
-            "additionalProperties": False,
-            "required": ["company_name", "ticker", "page_text", "news_limit"],
-            "properties": {
-                "company_name": STRING_FIELD_SCHEMA,
-                "ticker": STRING_FIELD_SCHEMA,
-                "page_text": STRING_FIELD_SCHEMA,
-                "news_limit": {
-                    "type": "object",
-                    "additionalProperties": False,
-                    "required": ["type", "required", "default"],
-                    "properties": {
-                        "type": {"type": "string"},
-                        "required": {"type": "boolean"},
-                        "default": {"type": "integer"},
-                    },
+            "additionalProperties": {
+                "type": "object",
+                "additionalProperties": True,
+                "required": ["type", "required"],
+                "properties": {
+                    "type": {"type": "string"},
+                    "required": {"type": "boolean"},
+                    "default": {"type": ["string", "integer", "number", "boolean", "null"]},
                 },
             },
         },
         "output_schema": {
             "type": "object",
-            "additionalProperties": False,
-            "required": ["company_name", "ticker", "current_price", "change_text", "report_text"],
-            "properties": {
-                "company_name": {"type": "string"},
-                "ticker": {"type": "string"},
-                "current_price": {"type": "string"},
-                "change_text": {"type": "string"},
-                "report_text": {"type": "string"},
-            },
+            "additionalProperties": {"type": "string"},
         },
         "arguments": {
             "type": "array",
@@ -443,8 +712,7 @@ WORKFLOW_JSON_SCHEMA: dict[str, Any] = {
                     "default_value": {"type": ["string", "integer", "null"]},
                     "validation": {
                         "type": "object",
-                        "additionalProperties": False,
-                        "required": ["min_length", "pattern", "minimum", "maximum"],
+                        "additionalProperties": True,
                         "properties": {
                             "min_length": {"type": ["integer", "null"]},
                             "pattern": {"type": ["string", "null"]},
@@ -481,13 +749,23 @@ WORKFLOW_JSON_SCHEMA: dict[str, Any] = {
                     "handler_ref": {"type": ["string", "null"]},
                     "action": {
                         "type": "object",
-                        "additionalProperties": False,
-                        "required": ["url_template", "source", "input_key", "template_resource"],
+                        "additionalProperties": True,
+                        "required": [],
                         "properties": {
                             "url_template": {"type": ["string", "null"]},
+                            "selector": {"type": ["string", "null"]},
                             "source": {"type": ["string", "null"]},
                             "input_key": {"type": ["string", "null"]},
+                            "value_template": {"type": ["string", "null"]},
+                            "text": {"type": ["string", "null"]},
                             "template_resource": {"type": ["string", "null"]},
+                            "instruction": {"type": ["string", "null"]},
+                            "success_criteria": {"type": "array", "items": {"type": "string"}},
+                            "allowed_operations": {"type": "array", "items": {"type": "string"}},
+                            "timeout_ms": {"type": ["integer", "null"]},
+                            "settle_ms": {"type": ["integer", "null"]},
+                            "nth": {"type": ["integer", "null"]},
+                            "exact": {"type": ["boolean", "null"]},
                         },
                     },
                     "argument_bindings": {
@@ -635,6 +913,82 @@ def _argument(
         "is_dynamic": is_dynamic,
         "order_index": order_index,
     }
+
+
+def _prompt_with_schema(prompt: str, schema: dict[str, Any]) -> str:
+    return (
+        f"{prompt}\n\n"
+        "Return only JSON. The following JSON Schema is a validation reference; "
+        "do not wrap the response in Markdown.\n"
+        f"{json.dumps(schema, ensure_ascii=False, sort_keys=True)}"
+    )
+
+
+def _without_private_keys(workflow: dict[str, Any]) -> dict[str, Any]:
+    return {key: value for key, value in workflow.items() if not key.startswith("_")}
+
+
+def _looks_like_naver_map_route(trace: ArtifactTrace) -> bool:
+    text = " ".join(
+        [
+            trace.user_request or "",
+            str(trace.arguments.get("final_state") or ""),
+            str(trace.arguments.get("start_url") or ""),
+            trace.final_url or "",
+            trace.title or "",
+        ]
+    ).lower()
+    return (
+        ("naver" in text or "네이버" in text)
+        and "지도" in text
+        and any(token in text for token in ["길찾기", "대중교통", "지하철", "route", "transit"])
+    )
+
+
+def _station_pair(trace: ArtifactTrace) -> tuple[str | None, str | None]:
+    arguments = trace.arguments
+    start = _first_string(
+        arguments,
+        [
+            "start_station",
+            "origin_station",
+            "from_station",
+            "departure_station",
+            "start",
+            "origin",
+        ],
+    )
+    end = _first_string(
+        arguments,
+        [
+            "end_station",
+            "destination_station",
+            "to_station",
+            "arrival_station",
+            "end",
+            "destination",
+        ],
+    )
+    if start and end:
+        return start, end
+
+    station_pattern = re.compile(r"([가-힣A-Za-z0-9]+역)\s*(?:에서|출발).*?([가-힣A-Za-z0-9]+역)\s*(?:까지|으로|로|도착)")
+    match = station_pattern.search(trace.user_request) or station_pattern.search(str(arguments.get("final_state") or ""))
+    if match:
+        return start or match.group(1), end or match.group(2)
+
+    simple_match = re.search(r"([가-힣A-Za-z0-9]+역)\s*에서\s*([가-힣A-Za-z0-9]+역)", trace.user_request)
+    if simple_match:
+        return start or simple_match.group(1), end or simple_match.group(2)
+    return start, end
+
+
+def _first_string(arguments: dict[str, Any], keys: list[str]) -> str | None:
+    for key in keys:
+        value = arguments.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return None
 
 
 def _extract_json(raw: str) -> str:
