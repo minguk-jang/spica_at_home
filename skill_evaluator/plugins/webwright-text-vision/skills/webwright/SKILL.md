@@ -30,6 +30,18 @@ but changes model routing:
   the standalone harness. That path starts nested `codex exec` processes and is
   much slower than direct plugin execution.
 
+## Routing Matrix
+
+- Browser task inside Codex: use this plugin directly through `@webwright`.
+- Reusable optimized run inside Codex: write `workflow.json` directly and run
+  `python3 -m webworkflows.cli intelligent-cold-init --synthesizer agent-json
+  --workflow-json-file <workspace>/workflow.json`.
+- Standalone OpenAI-compatible harness test: set
+  `WEBWRIGHT_MODEL_CONFIG=model_openai_compatible_text_vision.yaml`.
+- Standalone Codex OAuth harness test: set
+  `WEBWRIGHT_MODEL_CONFIG=model_codex_oauth_text_vision.yaml`; this is
+  fallback-only because it starts nested `codex exec`.
+
 ## Required Workflow
 
 1. **Create workspace.** Make a task-specific workspace under the current
@@ -53,6 +65,36 @@ but changes model routing:
 7. **Report artifacts.** Final output must identify `final_script.py`, the
    action log, final screenshot folder, and which critical points used text
    evidence versus vision fallback.
+
+## WebMCP Workflow Optimization
+
+When the task is meant to become reusable, call it a **WebMCP workflow**, not a
+skill. Codex agent skills are `SKILL.md` instruction files; WebMCP workflows are
+SQLite-backed browser workflows with arguments, steps, resources, handlers, run
+history, and update events.
+
+For a cold-init WebMCP workflow inside Codex:
+
+1. Explore DOM-first as above and collect text evidence.
+2. Let the active Codex model synthesize a `workflow.json` file directly in the
+   workspace. Do not call another Codex process to synthesize it.
+3. Materialize and validate it with:
+
+```bash
+python3 -m webworkflows.cli intelligent-cold-init \
+  --db outputs/webmcp_workflows/workflows.sqlite \
+  --output-dir outputs/webmcp_workflows/runs \
+  --request "<user request>" \
+  --company-name "<company>" \
+  --ticker "<ticker>" \
+  --page-text-file "<discovered text file>" \
+  --synthesizer agent-json \
+  --workflow-json-file "<workspace>/workflow.json"
+```
+
+Never use `--synthesizer codex` from inside Codex. That path launches nested
+`codex exec`, making startup slow and causing timeout risk. Keep
+`--synthesizer codex` only as an explicit standalone harness fallback.
 
 ## Headed Mode
 

@@ -1,9 +1,12 @@
 # Text-Default Workflow
 
 This local Webwright variant keeps the original code-as-action loop but changes
-the evidence model. The default agent should behave as if it cannot read images.
+the evidence model. The active Codex agent should behave as if it cannot read images.
 It should use Playwright to expose page state as text and structured data, then
 reserve screenshots for audit and vision fallback.
+
+Reusable optimized runs are called **WebMCP workflows**. Do not call them
+workflow skills; that name conflicts with Codex agent skills.
 
 ## DOM-First Evidence
 

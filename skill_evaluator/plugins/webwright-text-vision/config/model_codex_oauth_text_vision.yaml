@@ -1,10 +1,12 @@
-# Current mode: Codex OAuth through Codex CLI.
+# fallback-only mode: Codex OAuth through nested Codex CLI.
 #
 # Stack on top of base.yaml:
 #   python -m webwright.run.cli main -c base.yaml -c model_codex_oauth_text_vision.yaml ...
 #
-# The default agent uses gpt-5.3-codex-spark. Screenshot-oriented tools use the
-# vision_model block when present.
+# Do not use this from inside an active Codex session unless explicitly testing
+# the standalone harness. The preferred Codex path is direct plugin execution or
+# WebMCP workflow materialization with `--synthesizer agent-json`.
+# Screenshot-oriented fallback tools use the vision_model block when present.
 
 model:
   model_class: codex_cli

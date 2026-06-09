@@ -34,17 +34,33 @@ class TextDefaultVisionFallbackTest(unittest.TestCase):
         self.assertIn("Do not send screenshots to the default text model", skill)
         self.assertIn("No nested Codex", skill)
         self.assertIn("Do not launch the standalone Python harness as the default path", skill)
+        self.assertIn("WebMCP Workflow Optimization", skill)
+        self.assertIn("--synthesizer agent-json", skill)
+        self.assertIn("--workflow-json-file", skill)
+        self.assertIn("Never use `--synthesizer codex` from inside Codex", skill)
 
     def test_dual_model_config_disables_default_screenshot_attachment(self) -> None:
         config_path = PLUGIN_ROOT / "config" / "model_codex_oauth_text_vision.yaml"
 
         config = config_path.read_text()
 
+        self.assertIn("fallback-only", config)
+        self.assertNotIn("Current mode", config)
+        self.assertNotIn("default agent", config.lower())
         self.assertIn("model_class: codex_cli", config)
         self.assertIn("model_name: gpt-5.3-codex-spark", config)
         self.assertIn("attach_observation_screenshot: false", config)
         self.assertIn("vision_model:", config)
         self.assertIn("attach_observation_screenshot: true", config)
+
+    def test_text_default_alias_is_documented_as_fallback_only(self) -> None:
+        config_path = PLUGIN_ROOT / "config" / "model_text_default_vision_fallback.yaml"
+
+        config = config_path.read_text()
+
+        self.assertIn("fallback-only", config)
+        self.assertNotIn("current Codex OAuth mode", config)
+        self.assertIn("model_class: codex_cli", config)
 
     def test_openai_compatible_config_is_packaged_for_later_switch(self) -> None:
         config_path = PLUGIN_ROOT / "config" / "model_openai_compatible_text_vision.yaml"
@@ -56,13 +72,26 @@ class TextDefaultVisionFallbackTest(unittest.TestCase):
         self.assertIn("openai_api_key:", config)
         self.assertIn("vision_model:", config)
 
-    def test_run_script_defaults_to_codex_oauth_config(self) -> None:
+    def test_run_script_requires_explicit_harness_config_to_avoid_nested_codex(self) -> None:
         script_path = PLUGIN_ROOT / "scripts" / "run_text_vision_demo.sh"
 
         script = script_path.read_text()
 
-        self.assertIn("WEBWRIGHT_MODEL_CONFIG:-model_codex_oauth_text_vision.yaml", script)
+        self.assertIn("WEBWRIGHT_MODEL_CONFIG must be set", script)
+        self.assertIn("model_openai_compatible_text_vision.yaml", script)
+        self.assertNotIn("WEBWRIGHT_MODEL_CONFIG:-model_codex_oauth_text_vision.yaml", script)
         self.assertIn("python -m webwright.run.cli main", script)
+
+    def test_plugin_commands_document_webmcp_workflow_agent_json_path(self) -> None:
+        for command_name in ["run", "craft"]:
+            command_path = PLUGIN_ROOT / "skills" / "webwright" / "commands" / f"{command_name}.md"
+
+            command = command_path.read_text()
+
+            self.assertIn("WebMCP workflow", command)
+            self.assertIn("--synthesizer agent-json", command)
+            self.assertIn("--workflow-json-file", command)
+            self.assertIn("Do not use `--synthesizer codex` from inside Codex", command)
 
     def test_local_marketplace_points_at_current_plugin(self) -> None:
         marketplace_path = ROOT / ".agents" / "plugins" / "marketplace.json"

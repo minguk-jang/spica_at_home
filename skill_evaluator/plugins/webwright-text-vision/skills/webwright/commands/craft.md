@@ -20,6 +20,24 @@ harness test.
 7. Verify all critical points, clearly separating text evidence from vision
    fallback judgments.
 
+If the reusable output should be cached and evolved by the current repo, create
+a WebMCP workflow record as well. Write `workflow.json` in the workspace and
+materialize it without nested Codex:
+
+```bash
+python3 -m webworkflows.cli intelligent-cold-init \
+  --db outputs/webmcp_workflows/workflows.sqlite \
+  --output-dir outputs/webmcp_workflows/runs \
+  --request "<user request>" \
+  --company-name "<company>" \
+  --ticker "<ticker>" \
+  --page-text-file "<discovered text file>" \
+  --synthesizer agent-json \
+  --workflow-json-file "<workspace>/workflow.json"
+```
+
+Do not use `--synthesizer codex` from inside Codex.
+
 Task:
 
 ```text

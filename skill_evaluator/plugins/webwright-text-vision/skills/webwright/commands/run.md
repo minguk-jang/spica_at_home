@@ -19,6 +19,24 @@ harness test.
 7. Verify every critical point and report which evidence was text-only versus
    vision fallback.
 
+If the user wants the result reused or optimized, create a WebMCP workflow
+instead of another Codex skill. Write `workflow.json` in the workspace and
+materialize it without nested Codex:
+
+```bash
+python3 -m webworkflows.cli intelligent-cold-init \
+  --db outputs/webmcp_workflows/workflows.sqlite \
+  --output-dir outputs/webmcp_workflows/runs \
+  --request "<user request>" \
+  --company-name "<company>" \
+  --ticker "<ticker>" \
+  --page-text-file "<discovered text file>" \
+  --synthesizer agent-json \
+  --workflow-json-file "<workspace>/workflow.json"
+```
+
+Do not use `--synthesizer codex` from inside Codex.
+
 Task:
 
 ```text

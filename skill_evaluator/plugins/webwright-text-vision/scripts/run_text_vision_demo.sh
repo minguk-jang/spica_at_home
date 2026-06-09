@@ -1,7 +1,16 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-MODEL_CONFIG="${WEBWRIGHT_MODEL_CONFIG:-model_codex_oauth_text_vision.yaml}"
+if [[ -z "${WEBWRIGHT_MODEL_CONFIG:-}" ]]; then
+  cat >&2 <<'EOF'
+WEBWRIGHT_MODEL_CONFIG must be set for standalone harness runs.
+Use model_openai_compatible_text_vision.yaml when testing an OpenAI-compatible provider.
+Use model_codex_oauth_text_vision.yaml only when explicitly testing the nested codex_cli fallback.
+EOF
+  exit 2
+fi
+
+MODEL_CONFIG="${WEBWRIGHT_MODEL_CONFIG}"
 TASK="${WEBWRIGHT_TASK:-Search for flights from SEA to JFK on 2026-08-15 to 2026-08-20}"
 START_URL="${WEBWRIGHT_START_URL:-https://www.google.com/flights}"
 TASK_ID="${WEBWRIGHT_TASK_ID:-demo_text_vision}"
