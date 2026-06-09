@@ -220,6 +220,27 @@ class WorkflowSkillStore:
                     started_at text not null default current_timestamp,
                     finished_at text
                 );
+
+                create table if not exists workflow_update_proposals (
+                    id integer primary key autoincrement,
+                    skill_id integer not null references workflow_skills(id) on delete cascade,
+                    base_version_id integer not null references workflow_skill_versions(id),
+                    proposed_version integer not null,
+                    instruction text not null,
+                    discovery_provider text not null,
+                    synthesizer_provider text not null,
+                    synthesizer_model text not null,
+                    status text not null,
+                    proposed_workflow_json text not null,
+                    diff_json text not null,
+                    evidence_json text not null,
+                    synthesis_duration_ms integer,
+                    error_json text,
+                    applied_version_id integer references workflow_skill_versions(id),
+                    approved_by text,
+                    created_at text not null default current_timestamp,
+                    updated_at text not null default current_timestamp
+                );
                 """
             )
             _ensure_column(conn, "workflow_runs", "duration_ms", "integer")

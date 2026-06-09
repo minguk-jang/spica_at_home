@@ -116,6 +116,21 @@ class WorkflowSkillLoader:
             raise KeyError(f"WebMCP workflow not found: {name}")
         return self.load_skill(int(row["id"]))
 
+    def load_skill_version(self, name: str, version: int) -> WorkflowSkill:
+        with self.store.connect() as conn:
+            row = conn.execute(
+                """
+                select id
+                from workflow_skill_versions
+                where skill_id = (select id from workflow_skills where name = ?)
+                  and version = ?
+                """,
+                (name, version),
+            ).fetchone()
+        if not row:
+            raise KeyError(f"WebMCP workflow version not found: {name} v{version}")
+        return self._load_skill_version_id(int(row["id"]))
+
     def load_skill(self, skill_id: int) -> WorkflowSkill:
         with self.store.connect() as conn:
             skill_row = conn.execute(
@@ -132,7 +147,28 @@ class WorkflowSkillLoader:
             ).fetchone()
             if not skill_row:
                 raise KeyError(f"WebMCP workflow not found: {skill_id}")
+        return self._hydrate_skill(skill_row)
 
+    def _load_skill_version_id(self, version_id: int) -> WorkflowSkill:
+        with self.store.connect() as conn:
+            skill_row = conn.execute(
+                """
+                select
+                    s.id, s.name, s.description, s.domain, s.task_type,
+                    v.id as version_id, v.version, v.body_md,
+                    v.input_schema_json, v.output_schema_json
+                from workflow_skills s
+                join workflow_skill_versions v on v.skill_id = s.id
+                where v.id = ?
+                """,
+                (version_id,),
+            ).fetchone()
+            if not skill_row:
+                raise KeyError(f"WebMCP workflow version not found: {version_id}")
+        return self._hydrate_skill(skill_row)
+
+    def _hydrate_skill(self, skill_row: Any) -> WorkflowSkill:
+        with self.store.connect() as conn:
             argument_rows = conn.execute(
                 """
                 select * from workflow_skill_arguments

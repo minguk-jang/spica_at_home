@@ -7,6 +7,8 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import patch
 
 from webworkflows.executor import WorkflowExecutor
 from webworkflows.evolver import WorkflowSkillEvolver
@@ -164,6 +166,184 @@ class WorkflowSkillStoreTest(unittest.TestCase):
             self.assertIn("naver_stock_report", completed.stdout)
             self.assertIn("295500", completed.stdout)
             self.assertTrue((output_dir / "run_삼성전자_report.md").exists())
+
+    def test_loader_can_load_a_specific_workflow_version(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = Path(tmp) / "workflow_skills.sqlite"
+            output_dir = Path(tmp) / "runs"
+            store = WorkflowSkillStore(db_path)
+            store.initialize()
+            seed_naver_stock_report(store)
+
+            loader = WorkflowSkillLoader(store)
+            skill_v1 = loader.load_skill_by_name("naver_stock_report")
+            result = WorkflowExecutor(store, output_dir=output_dir).run(
+                skill_v1,
+                user_request="삼성전자 주가 리포트",
+                arguments={
+                    "company_name": "삼성전자",
+                    "ticker": "005930",
+                    "page_text": NAVER_STOCK_TEXT,
+                },
+            )
+            WorkflowSkillEvolver(store).record_update(
+                skill=skill_v1,
+                run_id=result.run_id,
+                update_type="new_example",
+                reason="Observed successful request.",
+                diff={"example": "삼성전자 주가 리포트"},
+            )
+
+            loaded_v1 = loader.load_skill_version("naver_stock_report", 1)
+            loaded_v2 = loader.load_skill_version("naver_stock_report", 2)
+
+            self.assertEqual(1, loaded_v1.version)
+            self.assertEqual(2, loaded_v2.version)
+            self.assertNotEqual(loaded_v1.version_id, loaded_v2.version_id)
+
+    def test_cli_runs_specific_workflow_version(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = Path(tmp) / "workflow_skills.sqlite"
+            output_dir = Path(tmp) / "runs"
+
+            completed = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "webworkflows.cli",
+                    "run-version",
+                    "--db",
+                    str(db_path),
+                    "--output-dir",
+                    str(output_dir),
+                    "--workflow-name",
+                    "naver_stock_report",
+                    "--version",
+                    "1",
+                    "--request",
+                    "네이버에서 삼성전자 주가 리포트",
+                    "--company-name",
+                    "삼성전자",
+                    "--ticker",
+                    "005930",
+                    "--page-text-file",
+                    str(FIXTURE_PATH),
+                ],
+                cwd=Path(__file__).resolve().parents[1],
+                text=True,
+                capture_output=True,
+                check=True,
+            )
+
+            payload = json.loads(completed.stdout)
+            self.assertEqual("naver_stock_report", payload["workflow"])
+            self.assertEqual(1, payload["workflow_version"])
+            self.assertEqual("succeeded", payload["status"])
+
+    def test_cli_resolves_live_page_text_with_browser_trace_collector(self) -> None:
+        from webworkflows.cli import resolve_run_page_text
+
+        args = SimpleNamespace(
+            page_text_file=None,
+            live_page_text=True,
+            output_dir="/tmp/webmcp-live-test",
+            headed=False,
+            request="네이버에서 삼성전자 주가 리포트",
+            company_name="삼성전자",
+            ticker="005930",
+        )
+
+        trace = SimpleNamespace(
+            page_text="삼성전자\n현재가\n310,500원",
+            provider="naver_browser_trace",
+            final_url="https://search.naver.com/search.naver?query=삼성전자%20주가",
+            title="삼성전자 주가 : 네이버 검색",
+            screenshots=["/tmp/webmcp-live-test/discovery_screenshots/live.png"],
+        )
+        with patch("webworkflows.cli.NaverBrowserTraceCollector") as collector_cls:
+            collector_cls.return_value.collect.return_value = trace
+            page_text, evidence = resolve_run_page_text(args)
+
+        self.assertIn("310,500원", page_text)
+        self.assertEqual("live_naver_browser", evidence["source"])
+        self.assertEqual(trace.final_url, evidence["final_url"])
+        collector_cls.assert_called_once_with(output_dir=args.output_dir, headed=False)
+
+    def test_cli_proposes_and_applies_workflow_update(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = Path(tmp) / "workflow_skills.sqlite"
+            workflow_json_path = Path(tmp) / "proposal.json"
+            proposed = naver_stock_workflow_json()
+            proposed["body_md"] = proposed["body_md"] + "\n\nInclude valuation metrics in the report."
+            proposed["summary"] = "Add valuation metrics."
+            proposed["output_schema"]["valuation_summary"] = "string"
+            proposed["resources"][0]["content_text"] = (
+                proposed["resources"][0]["content_text"]
+                + "\n## 밸류에이션\n{{valuation_summary}}\n"
+            )
+            workflow_json_path.write_text(json.dumps(proposed, ensure_ascii=False), encoding="utf-8")
+
+            propose_completed = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "webworkflows.cli",
+                    "propose-update",
+                    "--db",
+                    str(db_path),
+                    "--workflow-name",
+                    "naver_stock_report",
+                    "--base-version",
+                    "1",
+                    "--instruction",
+                    "리포트에 PER/PBR 같은 밸류에이션 섹션을 추가해줘",
+                    "--synthesizer",
+                    "agent-json",
+                    "--workflow-json-file",
+                    str(workflow_json_path),
+                    "--page-text-file",
+                    str(FIXTURE_PATH),
+                ],
+                cwd=Path(__file__).resolve().parents[1],
+                text=True,
+                capture_output=True,
+                check=True,
+            )
+
+            proposal_payload = json.loads(propose_completed.stdout)
+            self.assertEqual("draft", proposal_payload["status"])
+            self.assertEqual(1, proposal_payload["base_version"])
+            self.assertEqual(2, proposal_payload["proposed_version"])
+            self.assertIn("resources_changed", proposal_payload["diff"])
+            self.assertGreaterEqual(proposal_payload["proposal_id"], 1)
+
+            apply_completed = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "webworkflows.cli",
+                    "apply-proposal",
+                    "--db",
+                    str(db_path),
+                    "--proposal-id",
+                    str(proposal_payload["proposal_id"]),
+                    "--approved-by",
+                    "desktop-test",
+                ],
+                cwd=Path(__file__).resolve().parents[1],
+                text=True,
+                capture_output=True,
+                check=True,
+            )
+
+            apply_payload = json.loads(apply_completed.stdout)
+            self.assertEqual("applied", apply_payload["status"])
+            self.assertEqual(2, apply_payload["applied_version"])
+
+            store = WorkflowSkillStore(db_path)
+            loaded = WorkflowSkillLoader(store).load_skill_version("naver_stock_report", 2)
+            self.assertEqual(2, loaded.version)
+            self.assertIn("밸류에이션", loaded.resources["stock_report_markdown"])
 
     def test_cli_cold_init_creates_skill_and_records_timings(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

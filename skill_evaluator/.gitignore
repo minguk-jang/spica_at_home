@@ -9,6 +9,8 @@ runs/*
 playwright-report/
 test-results/
 *.tmp
+__pycache__/
+*.pyc
 reference/webwright/
 outputs/
 webwright_direct_smoke/
