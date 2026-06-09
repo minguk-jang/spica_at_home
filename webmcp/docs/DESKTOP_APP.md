@@ -11,7 +11,10 @@ flowchart TB
   subgraph Desktop["apps/desktop"]
     UI["src/<br/>React renderer"]
     Preload["electron/preload.cjs<br/>안전한 bridge"]
-    Main["electron/main.cjs<br/>IPC, process spawn"]
+    Main["electron/main.cjs<br/>window lifecycle"]
+    Ipc["electron/ipc-handlers.cjs<br/>IPC 등록"]
+    Client["electron/webmcp-core-client.cjs<br/>Core CLI adapter"]
+    Runner["electron/process-runner.cjs<br/>process 실행"]
     Paths["electron/project-paths.cjs<br/>기본 경로 계산"]
     Sidecar["rust/webmcp-sidecar<br/>SQLite 읽기"]
   end
@@ -21,9 +24,12 @@ flowchart TB
 
   UI --> Preload
   Preload --> Main
-  Main --> Paths
-  Main --> Sidecar
-  Main --> Core
+  Main --> Ipc
+  Ipc --> Paths
+  Ipc --> Sidecar
+  Ipc --> Client
+  Client --> Runner
+  Runner --> Core
   Sidecar --> DB
   Core --> DB
 ```
@@ -36,6 +42,27 @@ flowchart TB
   확인할 수 있게 합니다.
 - 선택된 version 하나를 headless 또는 headed로 실행합니다.
 - 사용자 수정 요청을 받아 Codex 기반 proposal을 생성하고 적용합니다.
+
+## Electron 경계
+
+```mermaid
+flowchart LR
+  Channel["IPC channel"]
+  Handler["ipc-handlers.cjs"]
+  Client["webmcp-core-client.cjs"]
+  Command["python -m webworkflows.cli"]
+  Result["normalized job result"]
+
+  Channel --> Handler
+  Handler --> Client
+  Client --> Command
+  Command --> Result
+```
+
+새 frontend app을 만들 때는 Electron IPC를 그대로 복제할 필요가 없습니다. 대신
+`webmcp-core-client.cjs`가 만드는 CLI 인자와 JSON result shape를 같은 adapter로
+구현하면 됩니다. `main.cjs`는 app lifecycle만 담당하므로 기능 변경은 대부분
+`ipc-handlers.cjs`나 Core service에서 처리합니다.
 
 ## 실행 흐름
 

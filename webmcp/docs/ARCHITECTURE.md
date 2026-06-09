@@ -11,6 +11,8 @@ flowchart LR
   subgraph Slice["webmcp/"]
     subgraph Core["core/"]
       CLI["webworkflows.cli"]
+      Services["services/<br/>use case facade"]
+      Providers["providers/<br/>model/provider port"]
       Executor["WorkflowExecutor"]
       Storage["WorkflowSkillStore"]
       Handlers["handlers/*.py"]
@@ -20,6 +22,7 @@ flowchart LR
     subgraph App["apps/desktop/"]
       React["React renderer"]
       IPC["Electron preload/main"]
+      CoreClient["webmcp-core-client.cjs"]
       Rust["Rust SQLite sidecar"]
     end
 
@@ -27,11 +30,14 @@ flowchart LR
   end
 
   React --> IPC
+  IPC --> CoreClient
   IPC --> Rust
-  IPC --> CLI
+  CoreClient --> CLI
+  CLI --> Services
+  Services --> Providers
   CLI --> Executor
   Executor --> Handlers
-  CLI --> Storage
+  Services --> Storage
   Rust --> Storage
   Core --> Plugin
 ```
@@ -66,6 +72,57 @@ sequenceDiagram
   CLI-->>Main: stdout JSON
   Main-->>UI: 실행 이벤트
 ```
+
+## Port/Adapter 구조
+
+```mermaid
+flowchart TB
+  subgraph AppAdapter["앱 adapter"]
+    Main["electron/main.cjs<br/>window lifecycle"]
+    Ipc["electron/ipc-handlers.cjs<br/>channel 등록"]
+    Client["electron/webmcp-core-client.cjs<br/>Python CLI contract"]
+    Runner["electron/process-runner.cjs<br/>child process"]
+  end
+
+  subgraph CoreFacade["Core facade"]
+    Runtime["services/workflow_runtime.py<br/>run latest/version"]
+    Update["services/update_runtime.py<br/>propose/apply"]
+    Provider["providers/synthesis_provider.py<br/>backend 선택"]
+  end
+
+  Main --> Ipc
+  Ipc --> Client
+  Client --> Runner
+  Runner --> Runtime
+  Runtime --> Update
+  Update --> Provider
+```
+
+`main.cjs`는 더 이상 Python 인자, stdout JSON parsing, queue event shape를 직접
+알지 않습니다. Desktop에서는 `webmcp-core-client.cjs`가 Core CLI adapter이고,
+Core에서는 `services/*.py`가 CLI와 future API server가 공유할 use case입니다.
+
+## Provider 교체 지점
+
+```mermaid
+flowchart LR
+  UpdateRuntime["WorkflowUpdateRuntime"]
+  Factory["create_synthesis_backend(name)"]
+  Codex["codex_cli"]
+  AgentJson["agent_json"]
+  FutureOpenAI["future openai_compatible"]
+  FutureClaude["future claude_code"]
+
+  UpdateRuntime --> Factory
+  Factory --> Codex
+  Factory --> AgentJson
+  Factory -.추가 예정.-> FutureOpenAI
+  Factory -.추가 예정.-> FutureClaude
+```
+
+현재 provider는 `codex`, `agent-json`, `fake-copy` 이름을 유지합니다. OpenAI-
+compatible API나 Claude Code를 붙일 때는 CLI와 Desktop IPC를 고치기보다
+`providers/synthesis_provider.py`에 backend를 추가하고 문서화합니다.
 
 ## 기본 경로
 

@@ -10,6 +10,8 @@ update proposal, Naver stock handler, Webwright text/vision 플러그인 패키�
 ```mermaid
 flowchart TB
   CLI["webworkflows.cli<br/>명령 진입점"]
+  Services["services/*.py<br/>실행/수정 facade"]
+  Providers["providers/*.py<br/>생성 provider 선택"]
   Store["storage.py<br/>SQLite 읽기/쓰기"]
   Loader["loader.py<br/>workflow 로드"]
   Executor["executor.py<br/>step 실행"]
@@ -17,11 +19,13 @@ flowchart TB
   Synthesis["synthesis.py / update_proposal.py<br/>생성/수정"]
   Plugin["plugins/webwright-text-vision<br/>Codex 플러그인 패키지"]
 
-  CLI --> Store
-  CLI --> Loader
+  CLI --> Services
+  Services --> Store
+  Services --> Loader
   Loader --> Executor
   Executor --> Handlers
-  CLI --> Synthesis
+  Services --> Synthesis
+  Services --> Providers
   Synthesis --> Store
   CLI --> Plugin
 ```
@@ -29,11 +33,34 @@ flowchart TB
 Core는 Desktop 앱 없이도 실행되어야 합니다. Codex plugin, CLI smoke test,
 Desktop IPC가 모두 같은 `webworkflows` 모듈을 호출합니다.
 
+## 이식 가능한 API 경계
+
+```mermaid
+flowchart TB
+  CLI["cli.py<br/>human/app entry"]
+  Runtime["services/workflow_runtime.py<br/>run_latest, run_version"]
+  Update["services/update_runtime.py<br/>propose_update, apply_proposal"]
+  Provider["providers/synthesis_provider.py<br/>create_synthesis_backend"]
+
+  CLI --> Runtime
+  CLI --> Update
+  Update --> Provider
+```
+
+Claude Code, OpenAI-compatible API, 다른 frontend로 옮길 때 우선 확인할 파일은
+다음 세 곳입니다.
+
+- `services/workflow_runtime.py`: workflow 실행 payload를 CLI와 같은 JSON shape로
+  반환합니다.
+- `services/update_runtime.py`: update proposal 생성과 적용 payload를 반환합니다.
+- `providers/synthesis_provider.py`: `codex`, `agent-json`, `fake-copy` provider 이름을
+  backend instance로 매핑합니다.
+
 ## 테스트
 
 ```bash
 cd webmcp/core
-python3 -m unittest tests/test_repo_structure.py tests/test_workflow_skills.py tests/test_text_default_vision_fallback.py
+python3 -m unittest tests/test_repo_structure.py tests/test_workflow_runtime_service.py tests/test_workflow_update_runtime_service.py tests/test_synthesis_provider_port.py tests/test_workflow_skills.py tests/test_text_default_vision_fallback.py
 ```
 
 `test_repo_structure.py`는 단순 파일 존재 여부뿐 아니라 현재 문서가 한글

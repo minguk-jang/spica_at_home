@@ -25,7 +25,10 @@ npm run app
 flowchart TB
   UI["src/main.tsx<br/>React 화면"]
   Preview["src/script-preview<br/>Python preview 생성"]
-  Main["electron/main.cjs<br/>IPC handler"]
+  Main["electron/main.cjs<br/>window lifecycle"]
+  Ipc["electron/ipc-handlers.cjs<br/>IPC handler"]
+  Client["electron/webmcp-core-client.cjs<br/>Core CLI adapter"]
+  Runner["electron/process-runner.cjs<br/>child process"]
   Preload["electron/preload.cjs<br/>bridge"]
   Paths["electron/project-paths.cjs<br/>core 경로 계산"]
   Sidecar["rust/webmcp-sidecar<br/>SQLite 조회"]
@@ -34,10 +37,25 @@ flowchart TB
   UI --> Preview
   UI --> Preload
   Preload --> Main
-  Main --> Paths
-  Main --> Sidecar
-  Main --> Core
+  Main --> Ipc
+  Ipc --> Paths
+  Ipc --> Sidecar
+  Ipc --> Client
+  Client --> Runner
+  Runner --> Core
 ```
+
+## App adapter 파일
+
+- `electron/ipc-handlers.cjs`: 기존 IPC channel 이름을 등록하고 queue lock을 관리합니다.
+- `electron/webmcp-core-client.cjs`: `run-version`, `propose-update`,
+  `apply-proposal` Python CLI 호출과 stdout JSON parsing을 담당합니다.
+- `electron/process-runner.cjs`: `child_process.spawn`을 감싼 작은 adapter입니다.
+- `electron/main.cjs`: Electron app lifecycle과 BrowserWindow 생성만 담당합니다.
+
+다른 frontend app으로 옮길 때는 이 adapter shape를 참고해 HTTP, Tauri, native app
+bridge로 바꾸면 됩니다. Core 내부 SQL이나 workflow executor를 UI 쪽으로 복제하지
+않습니다.
 
 ## 기본 경로
 

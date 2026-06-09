@@ -12,9 +12,9 @@ from webworkflows.cold_init import (
     StaticDiscoveryRunner,
     StaticTraceCollector,
 )
-from webworkflows.executor import WorkflowExecutor
-from webworkflows.loader import WorkflowSkillLoader
 from webworkflows.seeds import seed_naver_stock_report
+from webworkflows.services.update_runtime import WorkflowUpdateRuntime
+from webworkflows.services.workflow_runtime import WorkflowRuntime
 from webworkflows.synthesis import (
     AgentJsonSynthesisBackend,
     DEFAULT_CODEX_SYNTHESIS_MODEL,
@@ -23,11 +23,6 @@ from webworkflows.synthesis import (
     naver_stock_workflow_json,
 )
 from webworkflows.storage import WorkflowSkillStore
-from webworkflows.update_proposal import (
-    WorkflowUpdateProposalService,
-    backend_from_name,
-    workflow_json_from_skill,
-)
 
 
 def main() -> None:
@@ -143,16 +138,8 @@ def run(args: argparse.Namespace) -> None:
     store.initialize()
     seed_naver_stock_report(store)
 
-    loader = WorkflowSkillLoader(store)
-    candidates = loader.search(args.request)
-    if not candidates:
-        raise SystemExit(f"no WebMCP workflow matched request: {args.request}")
-
-    skill = loader.load_skill(candidates[0]["id"])
     page_text, page_text_evidence = resolve_run_page_text(args)
-    executor = WorkflowExecutor(store, output_dir=args.output_dir)
-    result = executor.run(
-        skill,
+    payload = WorkflowRuntime(store, output_dir=args.output_dir).run_latest(
         user_request=args.request,
         arguments={
             "company_name": args.company_name,
@@ -160,23 +147,9 @@ def run(args: argparse.Namespace) -> None:
             "page_text": page_text,
             "news_limit": args.news_limit,
         },
+        page_text_evidence=page_text_evidence,
     )
-    print(
-        json.dumps(
-            {
-                "workflow": skill.name,
-                "workflow_version": skill.version,
-                "run_id": result.run_id,
-                "status": result.status,
-                "llm_used": result.llm_used,
-                "page_text_evidence": page_text_evidence,
-                "output": result.output,
-                "report_path": result.report_path,
-            },
-            ensure_ascii=False,
-            sort_keys=True,
-        )
-    )
+    print(json.dumps(payload, ensure_ascii=False, sort_keys=True))
 
 
 def run_version(args: argparse.Namespace) -> None:
@@ -184,12 +157,10 @@ def run_version(args: argparse.Namespace) -> None:
     store.initialize()
     seed_naver_stock_report(store)
 
-    loader = WorkflowSkillLoader(store)
-    skill = loader.load_skill_version(args.workflow_name, args.version)
     page_text, page_text_evidence = resolve_run_page_text(args)
-    executor = WorkflowExecutor(store, output_dir=args.output_dir)
-    result = executor.run(
-        skill,
+    payload = WorkflowRuntime(store, output_dir=args.output_dir).run_version(
+        workflow_name=args.workflow_name,
+        version=args.version,
         user_request=args.request,
         arguments={
             "company_name": args.company_name,
@@ -197,23 +168,9 @@ def run_version(args: argparse.Namespace) -> None:
             "page_text": page_text,
             "news_limit": args.news_limit,
         },
+        page_text_evidence=page_text_evidence,
     )
-    print(
-        json.dumps(
-            {
-                "workflow": skill.name,
-                "workflow_version": skill.version,
-                "run_id": result.run_id,
-                "status": result.status,
-                "llm_used": result.llm_used,
-                "page_text_evidence": page_text_evidence,
-                "output": result.output,
-                "report_path": result.report_path,
-            },
-            ensure_ascii=False,
-            sort_keys=True,
-        )
-    )
+    print(json.dumps(payload, ensure_ascii=False, sort_keys=True))
 
 
 def propose_update(args: argparse.Namespace) -> None:
@@ -235,67 +192,27 @@ def propose_update(args: argparse.Namespace) -> None:
     else:
         page_text = Path(args.page_text_file).read_text(encoding="utf-8") if args.page_text_file else ""
         discovery_provider = args.discovery_provider
-    loader = WorkflowSkillLoader(store)
-    base_skill = loader.load_skill_version(args.workflow_name, args.base_version)
-    base_workflow = workflow_json_from_skill(store, base_skill)
-    backend = backend_from_name(
-        args.synthesizer,
-        workflow_json_file=args.workflow_json_file,
-        base_workflow_json=base_workflow,
-        cwd=Path(__file__).resolve().parents[1],
-    )
-    result = WorkflowUpdateProposalService(
-        store,
-        backend=backend,
-        model=args.synthesizer_model,
-        cwd=Path(__file__).resolve().parents[1],
-    ).propose(
+    payload = WorkflowUpdateRuntime(store, cwd=Path(__file__).resolve().parents[1]).propose_update(
         workflow_name=args.workflow_name,
         base_version=args.base_version,
         instruction=args.instruction,
         page_text=page_text,
         discovery_provider=discovery_provider,
+        synthesizer=args.synthesizer,
+        workflow_json_file=args.workflow_json_file,
+        synthesizer_model=args.synthesizer_model,
     )
-    print(
-        json.dumps(
-            {
-                "proposal_id": result.proposal_id,
-                "workflow": result.workflow_name,
-                "base_version": result.base_version,
-                "proposed_version": result.proposed_version,
-                "status": result.status,
-                "synthesizer": args.synthesizer,
-                "synthesizer_model": args.synthesizer_model,
-                "synthesis_duration_ms": result.synthesis_duration_ms,
-                "diff": result.diff,
-                "proposed_workflow_json": result.proposed_workflow_json,
-            },
-            ensure_ascii=False,
-            sort_keys=True,
-        )
-    )
+    print(json.dumps(payload, ensure_ascii=False, sort_keys=True))
 
 
 def apply_proposal(args: argparse.Namespace) -> None:
     store = WorkflowSkillStore(args.db)
     store.initialize()
-    result = WorkflowUpdateProposalService(store).apply(
+    payload = WorkflowUpdateRuntime(store).apply_proposal(
         proposal_id=args.proposal_id,
         approved_by=args.approved_by,
     )
-    print(
-        json.dumps(
-            {
-                "proposal_id": result.proposal_id,
-                "workflow": result.workflow_name,
-                "status": result.status,
-                "applied_version": result.applied_version,
-                "applied_version_id": result.applied_version_id,
-            },
-            ensure_ascii=False,
-            sort_keys=True,
-        )
-    )
+    print(json.dumps(payload, ensure_ascii=False, sort_keys=True))
 
 
 def resolve_run_page_text(args: argparse.Namespace) -> tuple[str, dict]:

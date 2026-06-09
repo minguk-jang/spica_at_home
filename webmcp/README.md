@@ -35,7 +35,9 @@ flowchart TB
 
 Desktop 앱은 워크플로우를 직접 구현하지 않습니다. 화면은 사용자가 선택한
 워크플로우를 보여주고, 읽기 작업은 Rust sidecar에 맡기며, 실행과 수정처럼
-DB를 바꾸는 작업은 Python CLI에 위임합니다.
+DB를 바꾸는 작업은 Python CLI에 위임합니다. 이 위임 경계는 service와 adapter로
+분리되어 있어 Claude Code, OpenAI-compatible API, 다른 frontend app으로 옮길 때
+교체 지점이 분명합니다.
 
 ```mermaid
 sequenceDiagram
@@ -59,13 +61,37 @@ sequenceDiagram
   Core->>DB: 실행/수정 이력 기록
 ```
 
+## 이식성 경계
+
+```mermaid
+flowchart LR
+  Frontend["Frontend<br/>Electron 또는 future app"]
+  Adapter["App adapter<br/>IPC, HTTP, CLI bridge"]
+  Services["Core services<br/>WorkflowRuntime, WorkflowUpdateRuntime"]
+  Providers["Provider ports<br/>Codex, agent-json, future OpenAI-compatible"]
+  Storage["SQLite storage"]
+
+  Frontend --> Adapter
+  Adapter --> Services
+  Services --> Providers
+  Services --> Storage
+```
+
+- Core 실행 contract는 `core/webworkflows/services/`에서 확인합니다.
+- 모델 provider 선택은 `core/webworkflows/providers/synthesis_provider.py`에
+  모읍니다.
+- Desktop의 process/IPC adapter는 `apps/desktop/electron/webmcp-core-client.cjs`와
+  `apps/desktop/electron/ipc-handlers.cjs`에 있습니다.
+- 새 frontend를 붙일 때는 Core 내부 SQL을 복제하지 말고, CLI JSON contract 또는
+  service facade와 같은 shape를 사용합니다.
+
 ## 빠른 시작
 
 Core 테스트:
 
 ```bash
 cd webmcp/core
-python3 -m unittest tests/test_repo_structure.py tests/test_workflow_skills.py tests/test_text_default_vision_fallback.py
+python3 -m unittest tests/test_repo_structure.py tests/test_workflow_runtime_service.py tests/test_workflow_update_runtime_service.py tests/test_synthesis_provider_port.py tests/test_workflow_skills.py tests/test_text_default_vision_fallback.py
 ```
 
 Desktop 실행:
@@ -93,6 +119,9 @@ webmcp/core/outputs/webmcp_plugin_cold_iter_check/workflows.sqlite
 ## 소스 규칙
 
 - 실행 엔진과 workflow handler는 `core/webworkflows`에 둡니다.
+- workflow 실행/수정 use case는 `core/webworkflows/services`에 둡니다.
+- Codex/OpenAI-compatible/agent-json 같은 생성 provider 선택은
+  `core/webworkflows/providers`에 둡니다.
 - Desktop 전용 UI와 IPC는 `apps/desktop`에 둡니다.
 - 공유 동작은 Desktop에 복제하지 말고 Core CLI나 DB 조회 계층을 통해
   호출합니다.

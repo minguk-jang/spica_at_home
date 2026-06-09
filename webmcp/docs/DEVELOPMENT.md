@@ -27,12 +27,17 @@ flowchart LR
 
 ```bash
 cd webmcp/core
-python3 -m unittest tests/test_repo_structure.py tests/test_workflow_skills.py tests/test_text_default_vision_fallback.py
+python3 -m unittest tests/test_repo_structure.py tests/test_workflow_runtime_service.py tests/test_workflow_update_runtime_service.py tests/test_synthesis_provider_port.py tests/test_workflow_skills.py tests/test_text_default_vision_fallback.py
 ```
 
 `tests/test_repo_structure.py`는 feature slice 구조, 문서 entry point, 한글
 문서화, Mermaid 다이어그램 개수를 함께 확인합니다. 구조를 바꾸면 이 테스트를
 먼저 갱신해야 합니다.
+
+`tests/test_workflow_runtime_service.py`와
+`tests/test_workflow_update_runtime_service.py`는 CLI와 다른 app adapter가 공유할
+Core service payload를 고정합니다. `tests/test_synthesis_provider_port.py`는 모델
+provider 이름이 흔들리지 않도록 확인합니다.
 
 ## Desktop 검증
 
