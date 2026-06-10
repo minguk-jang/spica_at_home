@@ -1,0 +1,25 @@
+# Future mode: OpenAI-compatible HTTP backend.
+#
+# To switch from Codex OAuth to this mode:
+#   1. Set OPENAI_API_KEY to the compatible provider key, or fill
+#      `openai_api_key` below for a local-only experiment.
+#   2. Edit model_name/openai_endpoint for the default text model.
+#   3. Edit vision_model.model_name/openai_endpoint for the vision fallback.
+#   4. Run with -c model_openai_compatible_text_vision.yaml.
+#
+# Keep `attach_observation_screenshot: false` on the default model so screenshots
+# only go to the vision fallback.
+
+model:
+  model_class: openai
+  model_name: gpt-5.5
+  openai_endpoint: https://api.openai.com/v1/responses
+  openai_api_key: ""
+  attach_observation_screenshot: false
+
+vision_model:
+  model_class: openai
+  model_name: gpt-5.5
+  openai_endpoint: https://api.openai.com/v1/responses
+  openai_api_key: ""
+  attach_observation_screenshot: true

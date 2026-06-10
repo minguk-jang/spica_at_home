@@ -11,6 +11,11 @@ test-results/
 *.tmp
 __pycache__/
 *.pyc
-reference/webwright/
+reference/webwright/.git/
+reference/webwright/.venv/
+reference/webwright/.pytest_cache/
+reference/webwright/**/__pycache__/
+reference/webwright/src/*.egg-info/
+reference/webwright/outputs/
 outputs/
 webwright_direct_smoke/
