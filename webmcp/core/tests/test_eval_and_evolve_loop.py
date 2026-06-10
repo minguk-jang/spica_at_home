@@ -23,6 +23,7 @@ from webworkflows.eval_loop import (
     StepEvaluation,
     WorkflowEvaluationError,
     WorkflowEvaluationReport,
+    _page_text_with_browser_state,
 )
 from webworkflows.executor import WorkflowExecutor
 from webworkflows.seeds import seed_naver_stock_report
@@ -204,6 +205,8 @@ class FakeBrowserPage:
             self.dynamic_evaluations.append(arg)
             self.body_text = self.body_text.replace("Sponsored popup", "")
             return {"status": "passed", "clicked_text": "Close ad"}
+        if "querySelectorAll('input, textarea, select')" in script:
+            return getattr(self, "form_controls", [])
         return [
             {
                 "text": "Close ad",
@@ -481,6 +484,20 @@ class EvalAndEvolveLoopTest(unittest.TestCase):
 
         self.assertEqual("", error)
         self.assertEqual([("#username", "tomsmith")], page.fills)
+
+    def test_eval_snapshot_page_text_includes_form_control_values(self) -> None:
+        page = FakeBrowserPage(body_text="Login Page\nUsername\nPassword\nLogin")
+        page.form_controls = [
+            {"selector": "#username", "type": "text", "value": "tomsmith"},
+            {"selector": "#password", "type": "password", "value": "SuperSecretPassword!"},
+        ]
+
+        page_text = asyncio.run(_page_text_with_browser_state(page, fallback=""))
+
+        self.assertIn("Login Page", page_text)
+        self.assertIn('#username value="tomsmith"', page_text)
+        self.assertIn("#password value=[filled]", page_text)
+        self.assertNotIn("SuperSecretPassword!", page_text)
 
     def test_browser_click_step_accepts_generated_source_action(self) -> None:
         page = FakeBrowserPage()

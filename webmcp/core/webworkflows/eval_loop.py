@@ -224,10 +224,7 @@ class PlaywrightEvalAndEvolveLoop:
                         output=output,
                         user_request=user_request,
                     )
-                    try:
-                        page_text = await page.locator("body").inner_text(timeout=15000)
-                    except Exception:
-                        page_text = page_text or values.get("page_text", "")
+                    page_text = await _page_text_with_browser_state(page, fallback=page_text or values.get("page_text", ""))
                     screenshot_path = eval_dir / f"step_{index:02d}_{_safe_name(step.name)}.png"
                     await page.screenshot(path=str(screenshot_path), full_page=True)
                     snapshot = EvaluationSnapshot(
@@ -261,6 +258,7 @@ class PlaywrightEvalAndEvolveLoop:
                             step_evaluations=step_evaluations,
                         )
 
+                page_text = await _page_text_with_browser_state(page, fallback=page_text or values.get("page_text", ""))
                 final_screenshot = eval_dir / "final.png"
                 await page.screenshot(path=str(final_screenshot), full_page=True)
                 final_snapshot = EvaluationSnapshot(
@@ -527,6 +525,119 @@ async def _merge_browser_state_output(page, output: dict[str, Any]) -> None:
         page_text = ""
     if page_text:
         output.setdefault("page_text", page_text)
+
+
+async def _page_text_with_browser_state(page, *, fallback: str = "") -> str:
+    try:
+        page_text = await page.locator("body").inner_text(timeout=15000)
+    except Exception:
+        page_text = fallback
+    control_text = await _form_control_state_text(page)
+    if not control_text:
+        return page_text
+    if not page_text:
+        return control_text
+    return f"{page_text}\n\nBrowser form controls:\n{control_text}"
+
+
+async def _form_control_state_text(page) -> str:
+    try:
+        controls = await page.evaluate(
+            """
+            () => {
+              const isVisible = (element) => {
+                const style = window.getComputedStyle(element);
+                const rect = element.getBoundingClientRect();
+                return style.visibility !== 'hidden' &&
+                  style.display !== 'none' &&
+                  rect.width > 0 &&
+                  rect.height > 0;
+              };
+              const labelText = (element) => {
+                const aria = element.getAttribute('aria-label');
+                if (aria) return aria.trim();
+                const id = element.getAttribute('id');
+                if (id) {
+                  const label = document.querySelector(`label[for="${CSS.escape(id)}"]`);
+                  if (label && label.textContent) return label.textContent.trim();
+                }
+                const parentLabel = element.closest('label');
+                if (parentLabel && parentLabel.textContent) return parentLabel.textContent.trim();
+                return '';
+              };
+              const selectorFor = (element, index) => {
+                const id = element.getAttribute('id');
+                if (id) return `#${id}`;
+                const name = element.getAttribute('name');
+                if (name) return `[name="${name}"]`;
+                return `${element.tagName.toLowerCase()}:nth-of-type(${index + 1})`;
+              };
+              return Array.from(document.querySelectorAll('input, textarea, select'))
+                .filter(isVisible)
+                .slice(0, 40)
+                .map((element, index) => ({
+                  selector: selectorFor(element, index),
+                  tag: element.tagName.toLowerCase(),
+                  type: (element.getAttribute('type') || '').toLowerCase(),
+                  id: element.getAttribute('id') || '',
+                  name: element.getAttribute('name') || '',
+                  label: labelText(element),
+                  placeholder: element.getAttribute('placeholder') || '',
+                  value: element.value || '',
+                  checked: Boolean(element.checked),
+                  selected_text: element.tagName.toLowerCase() === 'select'
+                    ? Array.from(element.selectedOptions).map((option) => option.textContent || '').join(', ').trim()
+                    : ''
+                }));
+            }
+            """
+        )
+    except Exception:
+        return ""
+    if not isinstance(controls, list):
+        return ""
+    lines = [_format_form_control_state(control) for control in controls if isinstance(control, dict)]
+    return "\n".join(line for line in lines if line)
+
+
+def _format_form_control_state(control: dict[str, Any]) -> str:
+    label = _control_label(control)
+    control_type = str(control.get("type") or control.get("tag") or "input").lower()
+    if control_type in {"checkbox", "radio"}:
+        return f"{label} checked={bool(control.get('checked'))}"
+    selected_text = str(control.get("selected_text") or "").strip()
+    if selected_text:
+        return f'{label} selected="{_compact_control_value(selected_text)}"'
+    value = str(control.get("value") or "")
+    if _is_sensitive_control(control):
+        value_text = "[filled]" if value else "[empty]"
+    else:
+        value_text = f'"{_compact_control_value(value)}"'
+    return f"{label} value={value_text}"
+
+
+def _control_label(control: dict[str, Any]) -> str:
+    for key in ("selector", "label", "name", "id", "placeholder", "tag"):
+        value = str(control.get(key) or "").strip()
+        if value:
+            return value.replace("\n", " ")
+    return "input"
+
+
+def _is_sensitive_control(control: dict[str, Any]) -> bool:
+    values = [
+        str(control.get("type") or ""),
+        str(control.get("name") or ""),
+        str(control.get("id") or ""),
+        str(control.get("label") or ""),
+        str(control.get("placeholder") or ""),
+    ]
+    joined = " ".join(values).lower()
+    return any(marker in joined for marker in ("password", "passwd", "secret", "token", "api key", "apikey"))
+
+
+def _compact_control_value(value: str) -> str:
+    return " ".join(value.split())[:240]
 
 
 def _handler_kwargs(handler, step: WorkflowStep, values: dict[str, Any]) -> dict[str, Any]:
