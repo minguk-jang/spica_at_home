@@ -64,34 +64,35 @@ index e09320e..30b79bd 100644
  
 diff --git a/src/webwright/config/model_codex_oauth_text_vision.yaml b/src/webwright/config/model_codex_oauth_text_vision.yaml
 new file mode 100644
-index 0000000..f788092
+index 0000000..acbf2de
 --- /dev/null
 +++ b/src/webwright/config/model_codex_oauth_text_vision.yaml
-@@ -0,0 +1,21 @@
-+# Current mode: Codex OAuth through Codex CLI.
+@@ -0,0 +1,22 @@
++# Current mode: Codex OAuth through Codex app-server.
 +#
 +# Stack on top of base.yaml:
 +#   python -m webwright.run.cli main -c base.yaml -c model_codex_oauth_text_vision.yaml ...
 +#
 +# The default agent uses gpt-5.5. Screenshot-oriented tools use the
-+# vision_model block when present.
++# vision_model block when present. This mode reuses the local Codex login
++# without spawning nested Codex subprocesses.
 +
 +model:
-+  model_class: codex_cli
++  model_class: codex_app_server
 +  model_name: gpt-5.5
-+  codex_sandbox: workspace-write
++  codex_sandbox: read-only
 +  request_timeout_seconds: 300
 +  attach_observation_screenshot: false
 +
 +vision_model:
-+  model_class: codex_cli
++  model_class: codex_app_server
 +  model_name: gpt-5.5
-+  codex_sandbox: workspace-write
++  codex_sandbox: read-only
 +  request_timeout_seconds: 300
 +  attach_observation_screenshot: true
 diff --git a/src/webwright/config/model_openai_compatible_text_vision.yaml b/src/webwright/config/model_openai_compatible_text_vision.yaml
 new file mode 100644
-index 0000000..daf46fb
+index 0000000..59cb001
 --- /dev/null
 +++ b/src/webwright/config/model_openai_compatible_text_vision.yaml
 @@ -0,0 +1,25 @@
@@ -122,51 +123,53 @@ index 0000000..daf46fb
 +  attach_observation_screenshot: true
 diff --git a/src/webwright/config/model_text_default_vision_fallback.yaml b/src/webwright/config/model_text_default_vision_fallback.yaml
 new file mode 100644
-index 0000000..7aa642b
+index 0000000..b443055
 --- /dev/null
 +++ b/src/webwright/config/model_text_default_vision_fallback.yaml
-@@ -0,0 +1,22 @@
-+# Backwards-compatible alias for the current Codex OAuth mode.
+@@ -0,0 +1,23 @@
++# Backwards-compatible alias for the current Codex app-server OAuth mode.
 +#
 +# Stack on top of base.yaml:
 +#   python -m webwright.run.cli -c base.yaml -c model_text_default_vision_fallback.yaml ...
 +#
-+# The agent uses the top-level `model` block through Codex CLI, so it inherits
-+# the user's Codex OAuth login. Screenshot-oriented tools such as image_qa and
-+# self_reflection use `vision_model` when present.
++# The agent uses the top-level `model` block through Codex app-server, so it
++# inherits the user's Codex OAuth login without nested subprocesses.
++# Screenshot-oriented tools such as image_qa and self_reflection use
++# `vision_model` when present.
 +
 +model:
-+  model_class: codex_cli
++  model_class: codex_app_server
 +  model_name: gpt-5.5
-+  codex_sandbox: workspace-write
++  codex_sandbox: read-only
 +  request_timeout_seconds: 300
 +  attach_observation_screenshot: false
 +
 +vision_model:
-+  model_class: codex_cli
++  model_class: codex_app_server
 +  model_name: gpt-5.5
-+  codex_sandbox: workspace-write
++  codex_sandbox: read-only
 +  request_timeout_seconds: 300
 +  attach_observation_screenshot: true
 diff --git a/src/webwright/models/__init__.py b/src/webwright/models/__init__.py
-index 6631ac0..3bdf94f 100644
+index 6631ac0..bd2adec 100644
 --- a/src/webwright/models/__init__.py
 +++ b/src/webwright/models/__init__.py
-@@ -9,6 +9,7 @@ _MODEL_MAPPING = {
+@@ -9,6 +9,8 @@ _MODEL_MAPPING = {
      "openai": "webwright.models.openai_model.OpenAIModel",
      "anthropic": "webwright.models.anthropic_model.AnthropicModel",
      "openrouter": "webwright.models.openrouter_model.OpenRouterModel",
-+    "codex_cli": "webwright.models.codex_cli_model.CodexCliModel",
++    "codex_app_server": "webwright.models.codex_app_server_model.CodexAppServerModel",
++    "codex_cli": "webwright.models.codex_app_server_model.CodexAppServerModel",
  }
  
  
-diff --git a/src/webwright/models/codex_cli_model.py b/src/webwright/models/codex_cli_model.py
+diff --git a/src/webwright/models/codex_app_server_model.py b/src/webwright/models/codex_app_server_model.py
 new file mode 100644
-index 0000000..63eec60
+index 0000000..1f1b4a4
 --- /dev/null
-+++ b/src/webwright/models/codex_cli_model.py
-@@ -0,0 +1,214 @@
-+"""Codex CLI model backend using the user's Codex OAuth login."""
++++ b/src/webwright/models/codex_app_server_model.py
+@@ -0,0 +1,406 @@
++"""Codex app-server model backend using the user's local Codex OAuth login."""
 +
 +from __future__ import annotations
 +
@@ -174,6 +177,7 @@ index 0000000..63eec60
 +import json
 +import subprocess
 +import tempfile
++import time
 +from pathlib import Path
 +from typing import Any
 +
@@ -185,10 +189,10 @@ index 0000000..63eec60
 +    parse_json_output,
 +)
 +
-+__all__ = ["CodexCliModel", "CodexCliModelConfig"]
++__all__ = ["CodexAppServerModel", "CodexAppServerModelConfig"]
 +
 +
-+class CodexCliModelConfig(BaseModelConfig):
++class CodexAppServerModelConfig(BaseModelConfig):
 +    model_name: OptStr = "gpt-5.5"
 +    codex_bin: OptStr = "codex"
 +    codex_sandbox: OptStr = "read-only"
@@ -228,9 +232,8 @@ index 0000000..63eec60
 +        content = message.get("content", "")
 +        parts: list[dict[str, Any]] = []
 +        if isinstance(content, str):
-+            text = content
-+            parts.append({"type": "input_text", "text": text})
-+            chunks.append(f"{role}:\n{text}")
++            parts.append({"type": "input_text", "text": content})
++            chunks.append(f"{role}:\n{content}")
 +            metrics_input.append({"content": parts})
 +            continue
 +
@@ -258,17 +261,216 @@ index 0000000..63eec60
 +    return "\n\n".join(chunks), images, metrics_input
 +
 +
-+class CodexCliModel(BaseModel):
++def _app_server_user_input(*, prompt: str, image_paths: list[Path]) -> list[dict[str, Any]]:
++    user_input: list[dict[str, Any]] = [{"type": "text", "text": prompt, "text_elements": []}]
++    for image_path in image_paths:
++        user_input.append({"type": "localImage", "path": str(image_path), "detail": "auto"})
++    return user_input
++
++
++class _CodexAppServerJsonRpcClient:
++    def __init__(self, *, codex_bin: str, cwd: Path, timeout_seconds: int):
++        self.codex_bin = codex_bin
++        self.cwd = cwd
++        self.timeout_seconds = timeout_seconds
++        self.process: subprocess.Popen[str] | None = None
++        self._next_id = 1
++
++    def run_turn(
++        self,
++        *,
++        prompt: str,
++        image_paths: list[Path],
++        model: str,
++        sandbox: str,
++        output_schema: dict[str, Any] | None,
++    ) -> str:
++        self._ensure_started()
++        thread_id = self._start_thread(model=model, sandbox=sandbox)
++        params: dict[str, Any] = {
++            "threadId": thread_id,
++            "input": _app_server_user_input(prompt=prompt, image_paths=image_paths),
++            "model": model,
++            "approvalPolicy": "never",
++            "sandboxPolicy": {"type": "readOnly", "networkAccess": False},
++        }
++        if output_schema is not None:
++            params["outputSchema"] = output_schema
++        turn_response_id = self._send_request("turn/start", params)
++        turn_result, events = self._read_response(turn_response_id, timeout_seconds=30)
++        turn_id = str(((turn_result.get("turn") or {}).get("id")) or "")
++        final_text = _agent_message_text(events, thread_id=thread_id, turn_id=turn_id)
++        if _turn_completed(events, thread_id=thread_id, turn_id=turn_id):
++            return final_text
++
++        deadline = time.time() + self.timeout_seconds
++        while time.time() < deadline:
++            message = self._read_message(deadline)
++            if _is_request(message):
++                self._send_error(
++                    str(message["id"]),
++                    code=-32601,
++                    message="Webwright Codex app-server model does not handle requests",
++                )
++                continue
++            if message.get("method") == "item/completed":
++                text = _agent_message_text([message], thread_id=thread_id, turn_id=turn_id)
++                if text:
++                    final_text = text
++            if message.get("method") == "turn/completed":
++                params = message.get("params") or {}
++                turn = params.get("turn") or {}
++                if params.get("threadId") == thread_id and turn.get("id") == turn_id:
++                    if turn.get("status") != "completed":
++                        raise RuntimeError(f"Codex app-server turn failed: {json.dumps(turn)[:1000]}")
++                    if not final_text.strip():
++                        raise RuntimeError("Codex app-server turn completed without an agent message.")
++                    return final_text
++        raise TimeoutError("Timed out waiting for Codex app-server turn to complete.")
++
++    def close(self) -> None:
++        process = self.process
++        self.process = None
++        if not process:
++            return
++        if process.poll() is None:
++            process.terminate()
++            try:
++                process.wait(timeout=5)
++            except subprocess.TimeoutExpired:
++                process.kill()
++                process.wait(timeout=5)
++
++    def _ensure_started(self) -> None:
++        if self.process and self.process.poll() is None:
++            return
++        self.process = subprocess.Popen(
++            [self.codex_bin, "app-server", "--stdio"],
++            stdin=subprocess.PIPE,
++            stdout=subprocess.PIPE,
++            stderr=subprocess.DEVNULL,
++            text=True,
++            bufsize=1,
++            cwd=str(self.cwd),
++        )
++        initialize_id = self._send_request(
++            "initialize",
++            {
++                "clientInfo": {
++                    "name": "webwright-codex-app-server",
++                    "title": "Webwright Codex App Server",
++                    "version": "0.1.0",
++                },
++                "capabilities": {
++                    "experimentalApi": True,
++                    "requestAttestation": False,
++                    "optOutNotificationMethods": [
++                        "item/agentMessage/delta",
++                        "item/plan/delta",
++                        "item/reasoning/textDelta",
++                        "item/reasoning/summaryTextDelta",
++                    ],
++                },
++            },
++        )
++        self._read_response(initialize_id, timeout_seconds=20)
++        self._send_notification("initialized")
++
++    def _start_thread(self, *, model: str, sandbox: str) -> str:
++        response_id = self._send_request(
++            "thread/start",
++            {
++                "model": model,
++                "cwd": str(self.cwd),
++                "approvalPolicy": "never",
++                "sandbox": sandbox,
++                "ephemeral": True,
++                "baseInstructions": (
++                    "You are only Webwright's JSON model backend. Do not use tools, shell commands, "
++                    "file edits, web browsing, or repo context yourself."
++                ),
++                "developerInstructions": (
++                    "Return only the requested model response. The outer Webwright harness executes actions."
++                ),
++                "config": {
++                    "model_verbosity": "low",
++                    "model_reasoning_summary": "none",
++                },
++            },
++        )
++        result, _events = self._read_response(response_id, timeout_seconds=30)
++        thread_id = str(((result.get("thread") or {}).get("id")) or "")
++        if not thread_id:
++            raise RuntimeError(f"Codex app-server did not return a thread id: {json.dumps(result)[:1000]}")
++        return thread_id
++
++    def _send_request(self, method: str, params: dict[str, Any]) -> str:
++        request_id = str(self._next_id)
++        self._next_id += 1
++        self._write_message({"id": request_id, "method": method, "params": params})
++        return request_id
++
++    def _send_notification(self, method: str, params: dict[str, Any] | None = None) -> None:
++        message: dict[str, Any] = {"method": method}
++        if params is not None:
++            message["params"] = params
++        self._write_message(message)
++
++    def _send_error(self, request_id: str, *, code: int, message: str) -> None:
++        self._write_message({"id": request_id, "error": {"code": code, "message": message}})
++
++    def _write_message(self, message: dict[str, Any]) -> None:
++        if not self.process or not self.process.stdin:
++            raise RuntimeError("Codex app-server process is not running.")
++        self.process.stdin.write(json.dumps(message, ensure_ascii=False) + "\n")
++        self.process.stdin.flush()
++
++    def _read_response(self, request_id: str, *, timeout_seconds: int) -> tuple[dict[str, Any], list[dict[str, Any]]]:
++        deadline = time.time() + timeout_seconds
++        events: list[dict[str, Any]] = []
++        while time.time() < deadline:
++            message = self._read_message(deadline)
++            if message.get("id") == request_id:
++                if "error" in message:
++                    raise RuntimeError(f"Codex app-server request failed: {json.dumps(message['error'])[:1000]}")
++                return message.get("result") or {}, events
++            events.append(message)
++        raise TimeoutError(f"Timed out waiting for Codex app-server response to {request_id}.")
++
++    def _read_message(self, deadline: float) -> dict[str, Any]:
++        if not self.process or not self.process.stdout:
++            raise RuntimeError("Codex app-server process is not running.")
++        if time.time() >= deadline:
++            raise TimeoutError("Timed out waiting for Codex app-server message.")
++        line = self.process.stdout.readline()
++        if not line:
++            raise RuntimeError("Codex app-server closed stdout.")
++        return json.loads(line)
++
++
++class CodexAppServerModel(BaseModel):
 +    _API_KEY_FIELD = ""
 +    _ENV_VAR = ""
-+    _LOG_SOURCE = "codex_cli"
-+    _DEFAULT_CONFIG_CLASS = CodexCliModelConfig
++    _LOG_SOURCE = "codex_app_server"
++    _DEFAULT_CONFIG_CLASS = CodexAppServerModelConfig
++
++    def __init__(self, *, config_class: type | None = None, **kwargs):
++        super().__init__(config_class=config_class, **kwargs)
++        cwd = Path(self.config.codex_workdir) if self.config.codex_workdir else Path.cwd()
++        self._app_server = _CodexAppServerJsonRpcClient(
++            codex_bin=self.config.codex_bin,
++            cwd=cwd,
++            timeout_seconds=self.config.request_timeout_seconds,
++        )
++
++    def close(self) -> None:
++        self._app_server.close()
 +
 +    def _request_headers(self) -> dict[str, str]:
 +        return {}
 +
 +    def _post_url(self) -> str:
-+        return "codex exec"
++        return "codex app-server"
 +
 +    def _build_payload(self, messages: list[dict[str, Any]]) -> dict[str, Any]:
 +        return {"messages": messages}
@@ -288,54 +490,17 @@ index 0000000..63eec60
 +            "reasoning_output_tokens": 0,
 +        }
 +
-+    def _codex_command(self, *, schema_path: Path | None, output_path: Path, images: list[Path]) -> list[str]:
-+        command = [
-+            self.config.codex_bin,
-+            "exec",
-+            "-m",
-+            self.config.model_name,
-+            "-s",
-+            self.config.codex_sandbox,
-+            "--ephemeral",
-+            "--skip-git-repo-check",
-+            "--color",
-+            "never",
-+            "-o",
-+            str(output_path),
-+        ]
-+        if self.config.codex_workdir:
-+            command.extend(["-C", self.config.codex_workdir])
-+        if schema_path is not None:
-+            command.extend(["--output-schema", str(schema_path)])
-+        for image in images:
-+            command.extend(["-i", str(image)])
-+        command.append("-")
-+        return command
-+
 +    def _run_codex(self, prompt: str, *, schema: dict[str, Any] | None, images: list[Path]) -> str:
-+        with tempfile.TemporaryDirectory(prefix="webwright-codex-cli-") as tmp:
-+            tmpdir = Path(tmp)
-+            output_path = tmpdir / "last_message.txt"
-+            schema_path = None
-+            if schema is not None:
-+                schema_path = tmpdir / "schema.json"
-+                schema_path.write_text(json.dumps(schema), encoding="utf-8")
-+            result = subprocess.run(
-+                self._codex_command(schema_path=schema_path, output_path=output_path, images=images),
-+                input=prompt,
-+                text=True,
-+                capture_output=True,
-+                encoding="utf-8",
-+                errors="replace",
-+                timeout=self.config.request_timeout_seconds,
-+                check=False,
-+            )
-+            if result.returncode != 0:
-+                raise RuntimeError(result.stderr.strip() or result.stdout.strip())
-+            return output_path.read_text(encoding="utf-8").strip()
++        return self._app_server.run_turn(
++            prompt=prompt,
++            image_paths=images,
++            model=self.config.model_name,
++            sandbox=self.config.codex_sandbox,
++            output_schema=schema,
++        )
 +
 +    def query(self, messages: list[dict[str, Any]], **kwargs: Any) -> dict[str, Any]:
-+        with tempfile.TemporaryDirectory(prefix="webwright-codex-cli-images-") as tmp:
++        with tempfile.TemporaryDirectory(prefix="webwright-codex-app-server-images-") as tmp:
 +            prompt, images, metrics_input = _messages_to_prompt_and_images(messages, Path(tmp))
 +            prompt = (
 +                f"{prompt}\n\nYou are acting only as Webwright's model backend. "
@@ -373,13 +538,63 @@ index 0000000..63eec60
 +        )
 +
 +    def __call__(self, messages: list[dict[str, Any]], **kwargs: Any) -> str:
-+        with tempfile.TemporaryDirectory(prefix="webwright-codex-cli-images-") as tmp:
++        with tempfile.TemporaryDirectory(prefix="webwright-codex-app-server-images-") as tmp:
 +            prompt, images, metrics_input = _messages_to_prompt_and_images(messages, Path(tmp))
 +            request_metrics = _request_metrics_from_serialized_input(metrics_input)
 +            self._last_request_metrics = dict(request_metrics)
 +            for key, value in request_metrics.items():
 +                self._cumulative_request_metrics[key] += value
 +            return self._run_codex(prompt, schema=None, images=images)
++
++
++def _agent_message_text(events: list[dict[str, Any]], *, thread_id: str, turn_id: str) -> str:
++    for event in events:
++        if event.get("method") != "item/completed":
++            continue
++        params = event.get("params") or {}
++        if params.get("threadId") != thread_id or params.get("turnId") != turn_id:
++            continue
++        item = params.get("item") or {}
++        if item.get("type") == "agentMessage" and item.get("phase") == "final_answer":
++            return str(item.get("text") or "")
++    return ""
++
++
++def _turn_completed(events: list[dict[str, Any]], *, thread_id: str, turn_id: str) -> bool:
++    for event in events:
++        if event.get("method") != "turn/completed":
++            continue
++        params = event.get("params") or {}
++        turn = params.get("turn") or {}
++        if params.get("threadId") == thread_id and turn.get("id") == turn_id:
++            if turn.get("status") != "completed":
++                raise RuntimeError(f"Codex app-server turn failed: {json.dumps(turn)[:1000]}")
++            return True
++    return False
++
++
++def _is_request(message: dict[str, Any]) -> bool:
++    return "id" in message and "method" in message and "result" not in message and "error" not in message
+diff --git a/src/webwright/models/codex_cli_model.py b/src/webwright/models/codex_cli_model.py
+new file mode 100644
+index 0000000..6cc3a0e
+--- /dev/null
++++ b/src/webwright/models/codex_cli_model.py
+@@ -0,0 +1,14 @@
++"""Compatibility aliases for the previous Codex CLI model backend name."""
++
++from __future__ import annotations
++
++from webwright.models.codex_app_server_model import CodexAppServerModel, CodexAppServerModelConfig
++
++CodexCliModelConfig = CodexAppServerModelConfig
++
++
++class CodexCliModel(CodexAppServerModel):
++    """Backward-compatible class name; runtime uses Codex app-server."""
++
++
++__all__ = ["CodexCliModel", "CodexCliModelConfig"]
 diff --git a/src/webwright/tools/_model_config.py b/src/webwright/tools/_model_config.py
 index cb1777a..e972dc9 100644
 --- a/src/webwright/tools/_model_config.py
@@ -396,7 +611,7 @@ index cb1777a..e972dc9 100644
      if not isinstance(model_block, dict):
          raise ValueError(
 diff --git a/tests/unit/test_tool_model_routing.py b/tests/unit/test_tool_model_routing.py
-index cf2c1ee..f1ac08a 100644
+index cf2c1ee..fd342dc 100644
 --- a/tests/unit/test_tool_model_routing.py
 +++ b/tests/unit/test_tool_model_routing.py
 @@ -2,6 +2,7 @@ import pytest
@@ -407,22 +622,28 @@ index cf2c1ee..f1ac08a 100644
  from webwright.tools._model_config import (
      DEFAULT_MERGED_CONFIG_RELPATH,
      _extract_model_block,
-@@ -25,12 +26,45 @@ def test_model_claude_does_not_declare_per_tool_overrides() -> None:
+@@ -25,12 +26,51 @@ def test_model_claude_does_not_declare_per_tool_overrides() -> None:
      assert "tools" not in config, "model_claude.yaml should rely on the top-level `model:` block"
  
  
-+def test_codex_cli_model_is_registered() -> None:
++def test_codex_app_server_model_is_registered() -> None:
++    model_class = get_model_class("codex_app_server")
++
++    assert model_class.__name__ == "CodexAppServerModel"
++
++
++def test_legacy_codex_cli_alias_uses_app_server_model() -> None:
 +    model_class = get_model_class("codex_cli")
 +
-+    assert model_class.__name__ == "CodexCliModel"
++    assert model_class.__name__ == "CodexAppServerModel"
 +
 +
-+def test_codex_oauth_text_vision_config_uses_codex_cli() -> None:
++def test_codex_oauth_text_vision_config_uses_codex_app_server() -> None:
 +    config = get_config_from_spec("model_codex_oauth_text_vision.yaml")
 +
-+    assert config["model"]["model_class"] == "codex_cli"
++    assert config["model"]["model_class"] == "codex_app_server"
 +    assert config["model"]["model_name"] == "gpt-5.5"
-+    assert config["vision_model"]["model_class"] == "codex_cli"
++    assert config["vision_model"]["model_class"] == "codex_app_server"
 +    assert config["vision_model"]["model_name"] == "gpt-5.5"
 +
 +

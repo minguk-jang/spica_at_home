@@ -4,7 +4,7 @@ import test from "node:test";
 import {
   browserModeLabel,
   evolutionStatusLabel
-} from "../src/evolutionDisplay.ts";
+} from "../src/features/evolve-workflow/model/evolutionDisplay.ts";
 
 test("presents browser mode in user-facing Korean labels", () => {
   assert.equal(browserModeLabel(false), "브라우저 숨김");

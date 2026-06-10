@@ -1,23 +1,20 @@
-# fallback-only mode: Codex OAuth through nested Codex CLI.
+# Codex app-server mode using the local Codex OAuth session.
 #
 # Stack on top of base.yaml:
 #   python -m webwright.run.cli main -c base.yaml -c model_codex_oauth_text_vision.yaml ...
 #
-# Do not use this from inside an active Codex session unless explicitly testing
-# the standalone harness. The preferred Codex path is direct plugin execution or
-# WebMCP workflow materialization with `--synthesizer agent-json`.
-# Screenshot-oriented fallback tools use the vision_model block when present.
+# This file does not use nested Codex subprocesses. It talks to
+# `codex app-server --stdio` and reuses the same local Codex login as the host
+# agent.
 
 model:
-  model_class: codex_cli
+  model_class: codex_app_server
   model_name: gpt-5.5
-  codex_sandbox: workspace-write
-  request_timeout_seconds: 300
+  codex_sandbox: read-only
   attach_observation_screenshot: false
 
 vision_model:
-  model_class: codex_cli
+  model_class: codex_app_server
   model_name: gpt-5.5
-  codex_sandbox: workspace-write
-  request_timeout_seconds: 300
+  codex_sandbox: read-only
   attach_observation_screenshot: true

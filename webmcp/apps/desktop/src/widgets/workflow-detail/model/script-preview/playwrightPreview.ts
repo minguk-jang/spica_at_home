@@ -1,4 +1,4 @@
-import type { WorkflowHandler, WorkflowResource, WorkflowStep } from "../vite-env";
+import type { WorkflowHandler, WorkflowResource, WorkflowStep } from "../../../../vite-env";
 
 export function generatePlaywrightScriptPreview(
   steps: WorkflowStep[],

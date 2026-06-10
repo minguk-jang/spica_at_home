@@ -378,7 +378,7 @@ class WorkflowEvolutionRuntime:
                     "For variable browser actions such as ads, popups, modals, or unstable page chrome, use a scriptless llm_browser_action step.",
                     "Do not store generated JavaScript, Python, Playwright code, script, or runtime selectors inside workflow JSON.",
                     "Keep deterministic executable implementation in the workflow version resources/handlers viewable from Implementation.",
-                    "Do not invoke nested codex exec from WebMCP core.",
+                    "Use the configured app-server or agent-json synthesis path; do not spawn nested Codex sessions.",
                 ],
             },
         }

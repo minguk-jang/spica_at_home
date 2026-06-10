@@ -32,12 +32,11 @@ store)을 재사용합니다.
 
 ## Evaluator Options
 
-현재 CLI 선택지는 세 가지입니다.
+현재 CLI 선택지는 두 가지입니다.
 
 ```text
 --vlm-evaluator codex            # default: Codex app-server + Codex OAuth
---vlm-evaluator codex-cli        # fallback: one codex exec subprocess per evaluation
---vlm-evaluator openai-responses # Platform API key + /v1/responses
+--vlm-evaluator openai-responses # optional: Platform API key + /v1/responses
 ```
 
 Desktop은 evaluator 선택을 UI에 노출하지 않고 항상 `--vlm-evaluator codex`를

@@ -15,10 +15,10 @@ from webworkflows.cold_init import (
     StaticDiscoveryRunner,
     StaticTraceCollector,
 )
-from webworkflows.dynamic_browser import CodexCliDynamicBrowserActionPlanner
+from webworkflows.dynamic_browser import CodexAppServerDynamicBrowserActionPlanner
 from webworkflows.eval_loop import PlaywrightEvalAndEvolveLoop, WorkflowEvaluationError
 from webworkflows.cold_init_types import ArtifactTrace
-from webworkflows.js_tool import JsToolExporter, eval_js_tool, run_js_tool
+from webworkflows.js_tool import JsToolExporter, JsToolRuntimeError, eval_js_tool, run_js_tool
 from webworkflows.page_memory import PageAnalysisStore, WorkflowKnowledgeStore, build_script_generation_knowledge
 from webworkflows.seeds import seed_naver_stock_report
 from webworkflows.services.update_runtime import WorkflowUpdateRuntime
@@ -31,15 +31,16 @@ from webworkflows.services.creation_runtime import (
 from webworkflows.services.workflow_runtime import WorkflowRuntime
 from webworkflows.synthesis import (
     AgentJsonSynthesisBackend,
+    CodexAppServerSynthesisBackend,
     DEFAULT_CODEX_SYNTHESIS_MODEL,
     FakeSynthesisBackend,
     LLMWorkflowSynthesizer,
     naver_stock_workflow_json,
 )
 from webworkflows.storage import WorkflowSkillStore, default_studio_db_path
+from webworkflows.step_guide import StepGuideSuggester, heuristic_step_guide
 from webworkflows.vlm_codex import (
     CodexAppServerVisionLanguageEvaluator,
-    CodexCliVisionLanguageEvaluator,
     CodexResponsesVisionLanguageEvaluator,
 )
 
@@ -155,6 +156,7 @@ def main() -> None:
     create_parser.add_argument("--ticker")
     create_parser.add_argument("--news-limit", type=int)
     create_parser.add_argument("--argument", action="append", default=[])
+    create_parser.add_argument("--step-guide-json")
     create_parser.add_argument("--page-text-file")
     create_parser.add_argument(
         "--discovery-provider",
@@ -176,6 +178,18 @@ def main() -> None:
     )
     create_parser.add_argument("--headed", action="store_true")
     add_eval_loop_args(create_parser)
+
+    suggest_steps_parser = subparsers.add_parser("suggest-step-guide")
+    add_db_arg(suggest_steps_parser)
+    suggest_steps_parser.add_argument("--start-url", required=True)
+    suggest_steps_parser.add_argument("--task", required=True)
+    suggest_steps_parser.add_argument("--final-state", required=True)
+    suggest_steps_parser.add_argument(
+        "--suggester",
+        choices=("codex", "heuristic"),
+        default="codex",
+    )
+    suggest_steps_parser.add_argument("--synthesizer-model", default=DEFAULT_CODEX_SYNTHESIS_MODEL)
 
     evolve_parser = subparsers.add_parser("evolve")
     add_db_arg(evolve_parser)
@@ -233,6 +247,8 @@ def main() -> None:
             intelligent_cold_init(args)
         elif args.command == "create-workflow":
             create_workflow(args)
+        elif args.command == "suggest-step-guide":
+            suggest_step_guide(args)
         elif args.command == "evolve":
             evolve(args)
         elif args.command == "export-js-tool":
@@ -255,13 +271,26 @@ def main() -> None:
             )
         )
         raise SystemExit(2)
+    except JsToolRuntimeError as exc:
+        print(
+            json.dumps(
+                {
+                    "status": "failed",
+                    "error_type": "javascript_tool_failed",
+                    "message": str(exc),
+                },
+                ensure_ascii=False,
+                sort_keys=True,
+            )
+        )
+        raise SystemExit(2)
 
 
 def add_eval_loop_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--eval-and-evolve", action="store_true")
     parser.add_argument(
         "--vlm-evaluator",
-        choices=("codex", "codex-cli", "openai-responses"),
+        choices=("codex", "openai-responses"),
         default="codex",
         help="Codex VLM evaluator backend for --eval-and-evolve.",
     )
@@ -356,26 +385,22 @@ def build_evaluation_loop(args: argparse.Namespace):
         return None
     model = getattr(args, "vlm_model", DEFAULT_CODEX_SYNTHESIS_MODEL)
     evaluator_name = getattr(args, "vlm_evaluator", "codex")
-    if evaluator_name == "codex-cli":
-        evaluator = CodexCliVisionLanguageEvaluator(
-            model=model,
-            cwd=Path(__file__).resolve().parents[1],
-        )
-    elif evaluator_name == "openai-responses":
+    if evaluator_name == "openai-responses":
         evaluator = CodexResponsesVisionLanguageEvaluator(model=model)
     else:
         evaluator = CodexAppServerVisionLanguageEvaluator(
             model=model,
             cwd=Path(__file__).resolve().parents[1],
         )
+    dynamic_action_planner = CodexAppServerDynamicBrowserActionPlanner(
+        model=model,
+        cwd=Path(__file__).resolve().parents[1],
+    )
     return PlaywrightEvalAndEvolveLoop(
         evaluator=evaluator,
         headed=getattr(args, "headed", False),
         browser_name=args.eval_browser,
-        dynamic_action_planner=CodexCliDynamicBrowserActionPlanner(
-            model=model,
-            cwd=Path(__file__).resolve().parents[1],
-        ),
+        dynamic_action_planner=dynamic_action_planner,
     )
 
 
@@ -590,7 +615,7 @@ def intelligent_cold_init(args: argparse.Namespace) -> None:
             raise SystemExit("--workflow-json-file is required with --synthesizer agent-json")
         backend = AgentJsonSynthesisBackend(workflow_json_path=args.workflow_json_file)
     else:
-        backend = None
+        backend = CodexAppServerSynthesisBackend(cwd=Path(__file__).resolve().parents[1])
     synthesizer = LLMWorkflowSynthesizer(backend=backend, model=args.synthesizer_model)
 
     result = IntelligentColdInitRunner(
@@ -653,7 +678,7 @@ def create_workflow(args: argparse.Namespace) -> None:
             raise SystemExit("--workflow-json-file is required with --synthesizer agent-json")
         backend = AgentJsonSynthesisBackend(workflow_json_path=args.workflow_json_file)
     else:
-        backend = None
+        backend = CodexAppServerSynthesisBackend(cwd=Path(__file__).resolve().parents[1])
     synthesizer = LLMWorkflowSynthesizer(backend=backend, model=args.synthesizer_model)
     arguments = _creation_arguments(args)
 
@@ -676,8 +701,105 @@ def create_workflow(args: argparse.Namespace) -> None:
     print(json.dumps(payload, ensure_ascii=False, sort_keys=True))
 
 
+def suggest_step_guide(args: argparse.Namespace) -> None:
+    store = WorkflowSkillStore(resolve_db_arg(args))
+    store.initialize()
+    page = PageAnalysisStore(store).lookup(args.start_url)
+    page_context = page.as_context() if page else {}
+    knowledge_context = [
+        entry.as_context()
+        for entry in WorkflowKnowledgeStore(store).recent(category="script_generation", limit=5)
+    ]
+    provider = args.suggester
+    model = args.synthesizer_model
+    error: dict[str, str] | None = None
+
+    if args.suggester == "heuristic":
+        step_guide = heuristic_step_guide(
+            start_url=args.start_url,
+            task=args.task,
+            final_state=args.final_state,
+        )
+    else:
+        suggester: StepGuideSuggester | None = None
+        try:
+            suggester = StepGuideSuggester(
+                cwd=Path(__file__).resolve().parents[1],
+                model=model,
+            )
+            suggestion = suggester.suggest(
+                start_url=args.start_url,
+                task=args.task,
+                final_state=args.final_state,
+                page_analysis_context=page_context,
+                knowledge_context=knowledge_context,
+            )
+            provider = suggestion.provider
+            step_guide = suggestion.step_guide
+        except Exception as exc:
+            provider = "heuristic_fallback"
+            error = {"type": type(exc).__name__, "message": str(exc)}
+            step_guide = heuristic_step_guide(
+                start_url=args.start_url,
+                task=args.task,
+                final_state=args.final_state,
+            )
+        finally:
+            if suggester is not None:
+                suggester.close()
+
+    print(
+        json.dumps(
+            {
+                "status": "succeeded",
+                "provider": provider,
+                "model": model,
+                "step_guide": step_guide,
+                "page_analysis_used": bool(page_context),
+                "knowledge_entries_used": len(knowledge_context),
+                **({"error": error} if error else {}),
+            },
+            ensure_ascii=False,
+            sort_keys=True,
+        )
+    )
+
+
 def _creation_arguments(args: argparse.Namespace) -> dict[str, object]:
-    return _workflow_arguments(args)
+    arguments = _workflow_arguments(args)
+    step_guide = _parse_step_guide_json(getattr(args, "step_guide_json", None))
+    if step_guide:
+        arguments["step_guide"] = step_guide
+    return arguments
+
+
+def _parse_step_guide_json(raw: str | None) -> list[dict[str, str]]:
+    if not raw:
+        return []
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise SystemExit(f"--step-guide-json must be valid JSON: {exc}") from exc
+    if not isinstance(parsed, list):
+        raise SystemExit("--step-guide-json must be a JSON array")
+
+    guide: list[dict[str, str]] = []
+    for index, item in enumerate(parsed):
+        if not isinstance(item, dict):
+            raise SystemExit("--step-guide-json items must be objects")
+        name = str(item.get("name") or "").strip()
+        description = str(item.get("description") or "").strip()
+        step_type = str(item.get("step_type") or item.get("stepType") or "").strip()
+        if not name and not description:
+            continue
+        guide.append(
+            {
+                "name": name or f"step_{index + 1}",
+                "description": description,
+                "step_type": step_type or "click",
+            }
+        )
+    return guide
 
 
 def _workflow_arguments(args: argparse.Namespace, *, page_text: str | None = None) -> dict[str, object]:

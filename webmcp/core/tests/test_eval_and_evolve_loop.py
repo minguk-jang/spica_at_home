@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 import sqlite3
-import subprocess
 import tempfile
 import unittest
 import argparse
@@ -18,6 +17,7 @@ from webworkflows.cold_init import (
     discovery_from_workflow_json,
 )
 from webworkflows.cli import add_eval_loop_args, build_evaluation_loop
+from webworkflows.dynamic_browser import CodexAppServerDynamicBrowserActionPlanner
 from webworkflows.eval_loop import (
     EvaluationSnapshot,
     StepEvaluation,
@@ -31,7 +31,6 @@ from webworkflows.storage import WorkflowSkillStore
 from webworkflows.synthesis import validate_workflow_json
 from webworkflows.vlm_codex import (
     CodexAppServerVisionLanguageEvaluator,
-    CodexCliVisionLanguageEvaluator,
     CodexResponsesVisionLanguageEvaluator,
 )
 
@@ -854,6 +853,56 @@ class EvalAndEvolveLoopTest(unittest.TestCase):
 
         self.assertEqual([screenshot_path.resolve()], fake_client.calls[0]["image_paths"])
 
+    def test_codex_app_server_dynamic_action_planner_uses_json_rpc_without_cli_exec(self) -> None:
+        fake_client = FakeCodexAppServerClient(
+            json.dumps(
+                {
+                    "javascript": "async (input) => ({ status: 'passed', instruction: input.instruction })",
+                    "summary": "Filled the requested route and dates.",
+                    "confidence": 0.87,
+                }
+            )
+        )
+        planner = CodexAppServerDynamicBrowserActionPlanner(
+            model="gpt-test",
+            app_server=fake_client,
+        )
+
+        action = planner.plan(
+            step_name="apply_route_and_dates",
+            instruction="Set SEA to JFK and apply dates.",
+            success_criteria=["SEA to JFK is visible"],
+            allowed_operations=["click", "fill"],
+            user_request="Search flights from SEA to JFK",
+            values={"origin": "SEA", "destination": "JFK"},
+            page_context={"url": "https://www.google.com/travel/flights", "candidates": []},
+        )
+        planner.close()
+
+        self.assertEqual("codex_app_server_dynamic_browser_action", action.provider)
+        self.assertEqual("gpt-test", action.model)
+        self.assertEqual(0.87, action.confidence)
+        self.assertIn("async (input)", action.javascript)
+        self.assertEqual("gpt-test", fake_client.calls[0]["model"])
+        self.assertEqual([], fake_client.calls[0]["image_paths"])
+        self.assertEqual("object", fake_client.calls[0]["output_schema"]["type"])
+        self.assertIn("Generate a one-time JavaScript browser action", fake_client.calls[0]["prompt"])
+        self.assertTrue(fake_client.closed)
+
+    def test_eval_loop_defaults_dynamic_actions_to_app_server_planner(self) -> None:
+        loop = build_evaluation_loop(
+            argparse.Namespace(
+                eval_and_evolve=True,
+                vlm_model="gpt-test",
+                vlm_evaluator="codex",
+                headed=True,
+                eval_browser="chromium",
+            )
+        )
+
+        self.assertIsNotNone(loop)
+        self.assertEqual("codex_app_server_dynamic_browser_action", loop.dynamic_action_planner.name)
+
     def test_codex_responses_vlm_evaluator_posts_screenshot_to_responses_api(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
@@ -933,101 +982,7 @@ class EvalAndEvolveLoopTest(unittest.TestCase):
         self.assertEqual("input_image", content[1]["type"])
         self.assertTrue(content[1]["image_url"].startswith("data:image/png;base64,"))
 
-    def test_codex_vlm_evaluator_parses_model_judgment_fields(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            tmp_path = Path(tmp)
-            screenshot_path = tmp_path / "step.png"
-            screenshot_path.write_bytes(b"fake-png")
-            calls: list[dict[str, Any]] = []
-
-            def fake_run(command, **kwargs):
-                output_path = Path(command[command.index("--output-last-message") + 1])
-                output_path.write_text(
-                    json.dumps(
-                        {
-                            "status": "passed",
-                            "summary": "삼성전자 증권정보 카드와 현재가 텍스트가 화면에 표시됩니다.",
-                            "problems": [],
-                            "suggested_update": "",
-                            "failure_kind": "",
-                            "expected_state": "네이버 검색 결과에 삼성전자 현재가 카드가 보여야 합니다.",
-                            "observed_state": "검색 결과 본문에 삼성전자, 현재가, 310,500원이 보입니다.",
-                            "repair_focus": "",
-                            "evidence_artifacts": [str(screenshot_path)],
-                        },
-                        ensure_ascii=False,
-                    ),
-                    encoding="utf-8",
-                )
-                calls.append({"command": command, "kwargs": kwargs})
-                return subprocess.CompletedProcess(command, 0, stdout='{"event":"done"}', stderr="")
-
-            evaluator = CodexCliVisionLanguageEvaluator(
-                model="gpt-5.5",
-                cwd=tmp_path,
-                run_command=fake_run,
-            )
-            result = evaluator.evaluate(
-                EvaluationSnapshot(
-                    step_name="wait_stock_card",
-                    step_type="wait_for_text",
-                    phase="intermediate",
-                    user_request="네이버에서 삼성전자 주가 리포트",
-                    url="https://search.naver.com/search.naver?query=삼성전자%20주가",
-                    title="삼성전자 주가 : 네이버 검색",
-                    page_text=LIVE_PAGE_TEXT,
-                    screenshot_path=str(screenshot_path),
-                    output={},
-                ),
-                {"assertions": {"contains_any": ["증권정보", "현재가"]}},
-            )
-
-        self.assertEqual("passed", result.status)
-        self.assertEqual("삼성전자 증권정보 카드와 현재가 텍스트가 화면에 표시됩니다.", result.summary)
-        self.assertEqual("네이버 검색 결과에 삼성전자 현재가 카드가 보여야 합니다.", result.expected_state)
-        self.assertEqual("검색 결과 본문에 삼성전자, 현재가, 310,500원이 보입니다.", result.observed_state)
-        self.assertEqual("codex_cli", result.evidence["vlm_evaluator"])
-        self.assertEqual("gpt-5.5", result.evidence["codex_model"])
-        self.assertIn("--image", calls[0]["command"])
-        self.assertEqual(str(screenshot_path), calls[0]["command"][calls[0]["command"].index("--image") + 1])
-        self.assertIn("WebMCP Playwright workflow step", calls[0]["kwargs"]["input"])
-
-    def test_codex_cli_vlm_evaluator_raises_when_model_is_at_capacity(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            tmp_path = Path(tmp)
-            screenshot_path = tmp_path / "step.png"
-            screenshot_path.write_bytes(b"fake-png")
-
-            def fake_run(command, **kwargs):
-                raise subprocess.CalledProcessError(
-                    1,
-                    command,
-                    output="",
-                    stderr="ERROR: Selected model is at capacity. Please try a different model.",
-                )
-
-            evaluator = CodexCliVisionLanguageEvaluator(
-                model="gpt-5.5",
-                cwd=tmp_path,
-                run_command=fake_run,
-            )
-            with self.assertRaisesRegex(RuntimeError, "codex VLM evaluation failed"):
-                evaluator.evaluate(
-                    EvaluationSnapshot(
-                        step_name="wait_route_results",
-                        step_type="wait_for_text",
-                        phase="intermediate",
-                        user_request="네이버 지도에서 양재역에서 사당역까지",
-                        url="https://map.naver.com/p/directions/example",
-                        title="길찾기 - 네이버지도",
-                        page_text="양재역 사당역 지하철 14분",
-                        screenshot_path=str(screenshot_path),
-                        output={},
-                    ),
-                    {"assertions": {"contains_any": ["지하철", "사당역", "분"]}},
-                )
-
-    def test_eval_loop_cli_defaults_to_codex_vlm_and_rejects_non_codex_evaluator(self) -> None:
+    def test_eval_loop_cli_defaults_to_codex_vlm_and_rejects_nested_codex_cli_evaluator(self) -> None:
         parser = argparse.ArgumentParser()
         add_eval_loop_args(parser)
 
@@ -1038,20 +993,23 @@ class EvalAndEvolveLoopTest(unittest.TestCase):
         self.assertEqual("gpt-5.5", loop.evaluator.model)
         self.assertEqual(Path(__file__).resolve().parents[1], loop.evaluator.app_server.cwd)
 
-        args = parser.parse_args(["--eval-and-evolve", "--vlm-evaluator", "codex-cli"])
-        loop = build_evaluation_loop(args)
-        self.assertEqual("codex_cli", loop.evaluator.name)
-
+        with self.assertRaises(SystemExit):
+            parser.parse_args(["--eval-and-evolve", "--vlm-evaluator", "codex-cli"])
         with self.assertRaises(SystemExit):
             parser.parse_args(["--eval-and-evolve", "--vlm-evaluator", "local-only"])
 
-    def test_eval_loop_module_does_not_spawn_nested_codex_exec(self) -> None:
-        source = Path(__file__).resolve().parents[1].joinpath("webworkflows", "eval_loop.py").read_text(
-            encoding="utf-8"
-        )
+    def test_runtime_modules_do_not_spawn_nested_codex_exec(self) -> None:
+        runtime_root = Path(__file__).resolve().parents[1] / "webworkflows"
+        offenders: list[str] = []
+        for source_path in runtime_root.rglob("*.py"):
+            source = source_path.read_text(encoding="utf-8")
+            lowered = source.lower()
+            if "codex exec" in lowered or "codexcli" in source or "codex-cli" in lowered or "codex_cli" in source:
+                offenders.append(str(source_path.relative_to(runtime_root)))
+            if '"codex"' in source and '"exec"' in source:
+                offenders.append(str(source_path.relative_to(runtime_root)))
 
-        self.assertNotIn('"exec"', source)
-        self.assertNotIn("codex exec", source.lower())
+        self.assertEqual([], sorted(set(offenders)))
 
     def test_executor_fails_run_when_browser_evaluation_fails(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

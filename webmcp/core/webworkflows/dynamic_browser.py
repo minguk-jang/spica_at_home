@@ -1,8 +1,6 @@
 from __future__ import annotations
 
 import json
-import subprocess
-import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Protocol
@@ -17,6 +15,19 @@ DYNAMIC_ACTION_SCRIPT_KEYS = {
     "playwright_code",
     "python_code",
     "script",
+}
+DYNAMIC_BROWSER_ACTION_RESPONSE_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "required": ["javascript", "summary", "confidence"],
+    "properties": {
+        "javascript": {
+            "type": "string",
+            "description": "A JavaScript function expression: async (input) => { ... }",
+        },
+        "summary": {"type": "string"},
+        "confidence": {"type": "number"},
+    },
+    "additionalProperties": False,
 }
 _FORBIDDEN_JAVASCRIPT_TOKENS = (
     "fetch(",
@@ -68,8 +79,8 @@ class DynamicBrowserActionPlanner(Protocol):
         ...
 
 
-class CodexCliDynamicBrowserActionPlanner:
-    name = "codex_cli_dynamic_browser_action"
+class CodexAppServerDynamicBrowserActionPlanner:
+    name = "codex_app_server_dynamic_browser_action"
 
     def __init__(
         self,
@@ -77,12 +88,12 @@ class CodexCliDynamicBrowserActionPlanner:
         model: str = DEFAULT_DYNAMIC_BROWSER_ACTION_MODEL,
         cwd: str | Path | None = None,
         timeout_seconds: int = 180,
-        run_command=subprocess.run,
+        app_server: Any | None = None,
     ):
         self.model = model
         self.cwd = Path(cwd) if cwd else None
         self.timeout_seconds = timeout_seconds
-        self.run_command = run_command
+        self.app_server = app_server or self._new_app_server()
 
     def plan(
         self,
@@ -104,39 +115,13 @@ class CodexCliDynamicBrowserActionPlanner:
             values=values,
             page_context=page_context,
         )
-        with tempfile.TemporaryDirectory() as tmp:
-            output_path = Path(tmp) / "dynamic_browser_action.json"
-            command = [
-                "codex",
-                "exec",
-                "--model",
-                self.model,
-                "--ephemeral",
-                "--ignore-rules",
-                "--ignore-user-config",
-                "--sandbox",
-                "read-only",
-                "--output-last-message",
-                str(output_path),
-                prompt,
-            ]
-            try:
-                completed = self.run_command(
-                    command,
-                    cwd=str(self.cwd) if self.cwd else None,
-                    text=True,
-                    capture_output=True,
-                    timeout=self.timeout_seconds,
-                    check=True,
-                )
-            except subprocess.CalledProcessError as exc:
-                raise RuntimeError(
-                    "codex dynamic browser action synthesis failed "
-                    f"(exit={exc.returncode}, model={self.model}).\n"
-                    f"STDERR:\n{exc.stderr}\nSTDOUT:\n{exc.stdout}"
-                ) from exc
-            raw_output = output_path.read_text(encoding="utf-8") if output_path.exists() else completed.stdout
-        parsed = json.loads(_extract_json(raw_output))
+        result = self.app_server.run_turn(
+            prompt=prompt,
+            output_schema=DYNAMIC_BROWSER_ACTION_RESPONSE_SCHEMA,
+            image_paths=[],
+            model=self.model,
+        )
+        parsed = json.loads(_extract_json(str(result.get("text") or "")))
         javascript = str(parsed.get("javascript") or "")
         validate_dynamic_javascript(javascript)
         confidence = parsed.get("confidence")
@@ -147,6 +132,33 @@ class CodexCliDynamicBrowserActionPlanner:
             model=self.model,
             confidence=float(confidence) if isinstance(confidence, (int, float)) else None,
             raw_response=parsed,
+        )
+
+    def close(self) -> None:
+        close = getattr(self.app_server, "close", None)
+        if callable(close):
+            close()
+
+    def _new_app_server(self):
+        from webworkflows.vlm_codex import CodexAppServerJsonRpcClient
+
+        return CodexAppServerJsonRpcClient(
+            cwd=self.cwd,
+            timeout_seconds=self.timeout_seconds,
+            client_info={
+                "name": "webmcp-dynamic-browser-action",
+                "title": "WebMCP Dynamic Browser Action",
+                "version": "0.1.0",
+            },
+            base_instructions=(
+                "You generate one-time browser JavaScript functions for WebMCP dynamic steps as JSON. "
+                "Do not use tools, shell commands, file reads, skills, web, or repo context."
+            ),
+            developer_instructions=(
+                "Return only JSON matching the dynamic action schema. "
+                "The JavaScript must be runtime-only and must not call network or browser storage APIs."
+            ),
+            request_error_message="WebMCP dynamic browser action planner does not handle requests",
         )
 
 
@@ -160,18 +172,6 @@ def build_dynamic_browser_action_prompt(
     values: dict[str, Any],
     page_context: dict[str, Any],
 ) -> str:
-    contract = {
-        "type": "object",
-        "required": ["javascript", "summary", "confidence"],
-        "properties": {
-            "javascript": {
-                "type": "string",
-                "description": "A JavaScript function expression: async (input) => { ... }",
-            },
-            "summary": {"type": "string"},
-            "confidence": {"type": "number"},
-        },
-    }
     return (
         "Generate a one-time JavaScript browser action for a WebMCP dynamic workflow step.\n"
         "Return only JSON matching the response contract. Do not use Markdown.\n"
@@ -187,7 +187,8 @@ def build_dynamic_browser_action_prompt(
         f"User request: {user_request}\n"
         f"Values JSON: {json.dumps(values, ensure_ascii=False, sort_keys=True)[:4000]}\n"
         f"Page context JSON: {json.dumps(page_context, ensure_ascii=False, sort_keys=True)[:12000]}\n"
-        f"Response contract JSON: {json.dumps(contract, ensure_ascii=False, sort_keys=True)}\n"
+        "Response contract JSON: "
+        f"{json.dumps(DYNAMIC_BROWSER_ACTION_RESPONSE_SCHEMA, ensure_ascii=False, sort_keys=True)}\n"
     )
 
 

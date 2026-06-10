@@ -86,6 +86,12 @@ function registerWebmcpIpcHandlers({
     });
   });
 
+  ipcMain.handle("webmcp:suggest-step-guide", async (event, payload) => {
+    return withQueueLock("A run, creation, suggestion, or evolution job is already active.", async () => {
+      return coreClient.suggestStepGuide({ sender: event.sender, payload });
+    });
+  });
+
   ipcMain.handle("webmcp:export-js-tool", async (event, payload) => {
     return withQueueLock("A run or JavaScript tool job is already active.", async () => {
       return coreClient.exportJsTool({ sender: event.sender, payload });

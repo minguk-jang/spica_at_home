@@ -71,6 +71,34 @@ python3 -m unittest discover -s tests
 `test_repo_structure.py`는 단순 파일 존재 여부뿐 아니라 현재 문서가 한글
 중심인지, 주요 문서에 Mermaid 다이어그램이 충분히 있는지도 확인합니다.
 
+## Ablation study 실행
+
+지금까지 만든 ablation suite는 repo root에서 한 명령으로 재실행할 수 있습니다.
+
+```bash
+cd webmcp
+python3 core/scripts/run_ablation_studies.py --suite all
+```
+
+Suite 구성은 다음과 같습니다.
+
+- `baseline`: Naver stock/map fixture, JS tool export, dynamic ad 기본 비교.
+- `harder`: checkout, ticket triage, dynamic ad를 3개 DOM variant로 실행해 static selector와 runtime dynamic action을 비교.
+- `memory`: `none`, `page_analysis_only`, `knowledge_only`, `page_analysis_plus_knowledge` 생성 조건을 비교.
+
+시간이 부족하면 browser 변동성과 memory 효과만 보는 빠른 경로를 사용합니다.
+
+```bash
+python3 core/scripts/run_ablation_studies.py --suite fast
+python3 core/scripts/run_ablation_studies.py --suite all --skip-run
+```
+
+`--skip-run`은 기존 `core/outputs/ablation_*` 결과를 다시 모아
+`core/outputs/ablation_latest/consolidated_summary.md`와
+`core/outputs/ablation_latest/consolidated_results.json`만 갱신합니다. 모든 suite는
+throwaway SQLite DB와 local demo site를 `core/outputs/**` 아래에 만들며,
+`~/.webmcp-studio/db/workflows.sqlite` persistent 제품 DB를 쓰지 않습니다.
+
 ## Workflow CLI
 
 fixture 기반 deterministic 실행:
@@ -106,9 +134,9 @@ Eval and evolve loop를 켜면 Playwright가 workflow step을 실제 브라우�
 `codex exec` subprocess를 반복 실행하지 않고 Codex app-server를 통해 저장된 Codex
 OAuth 로그인을 재사용합니다. 기본 모델 `gpt-5.5`로 step screenshot과 page text, URL,
 title, handler output, assertion을 함께 보고 JSON 결과를 반환합니다. 모델 없는 로컬
-판정이나 수동 VLM JSON 파일 경로는 사용하지 않습니다. 기존 Codex CLI subprocess
-경로가 꼭 필요하면 명시적으로 `--vlm-evaluator codex-cli`를, Platform API key 기반
-Responses API 경로가 필요하면 `--vlm-evaluator openai-responses`를 사용합니다.
+판정이나 수동 VLM JSON 파일 경로는 사용하지 않습니다. Platform API key 기반
+Responses API 경로가 꼭 필요할 때만 명시적으로 `--vlm-evaluator openai-responses`를
+사용합니다.
 
 ```bash
 python3 -m webworkflows.cli run-version \
@@ -292,9 +320,9 @@ plugin variant입니다. 기본 작업은 text/DOM/ARIA evidence를 우선 사�
 시각 판단이 반드시 필요할 때만 vision model로 넘기는 구조입니다.
 
 Codex 세션 안에서는 nested `codex exec`를 피해야 합니다. 브라우저 작업은
-`@webwright`를 사용하고, 반복 가능한 workflow 생성은 active Codex 모델이
-`workflow.json`을 직접 작성한 뒤 `--synthesizer agent-json`으로 materialize하는
-경로를 사용합니다.
+`@webwright`를 사용합니다. 반복 가능한 workflow 생성은 active Codex 모델이
+`workflow.json`을 직접 작성한 뒤 `--synthesizer agent-json`으로 materialize하거나,
+Core가 Codex app-server를 통해 `--synthesizer codex`를 실행하는 경로를 사용합니다.
 
 ## Reference patch
 

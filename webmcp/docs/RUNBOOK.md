@@ -166,6 +166,23 @@ python3 -m webworkflows.cli run-version \
 
 새 tool 생성은 start URL, 작업 설명, 완료 상태만 입력합니다. 생성 전에는 schema를
 모르므로 `ticker`, `company_name` 같은 domain-specific 입력을 UI에 만들지 않습니다.
+탐색 순서를 사람이 알고 있거나 작업이 큰 경우에는 Create sheet의 `Step guide`에
+rough step을 추가합니다. CLI에서는 같은 값을 `--step-guide-json`으로 넘깁니다.
+Core는 이 guide를 `workflow_creation_sessions.input_json`의 `step_guide`에 저장하고,
+생성 prompt의 `Human-authored step guide JSON` 섹션으로 전달합니다.
+한 줄씩 만들기 번거로우면 Create sheet에서 `Suggest Draft`를 먼저 누릅니다. 이 버튼은
+Core `suggest-step-guide`를 호출해 LLM 기반 rough steps를 만들고, 실패하면 heuristic
+초안을 반환합니다. 기본 Codex 추천은 `codex exec` subprocess가 아니라 Codex app-server
+JSON-RPC 경로를 사용합니다. 초안은 drag/drop, 위/아래 이동, 복제, 삭제로 편집합니다.
+
+```bash
+python3 -m webworkflows.cli suggest-step-guide \
+  --db ~/.webmcp-studio/db/workflows.sqlite \
+  --start-url "https://the-internet.herokuapp.com/login" \
+  --task "Log in with the documented test credentials and summarize the secure area" \
+  --final-state "The secure area success message is visible" \
+  --suggester codex
+```
 
 ```bash
 cd /Users/mingukjang/git/spica_at_home/webmcp/core
@@ -175,6 +192,7 @@ python3 -m webworkflows.cli create-workflow \
   --start-url "https://the-internet.herokuapp.com/login" \
   --task "Log in with the documented test credentials and summarize the secure area" \
   --final-state "The secure area success message is visible" \
+  --step-guide-json '[{"name":"open_login","description":"Open the login page.","step_type":"goto"},{"name":"submit_credentials","description":"Fill the documented username and password, then submit.","step_type":"fill"},{"name":"wait_secure_area","description":"Wait for the secure area success message.","step_type":"wait_for_text"}]' \
   --eval-and-evolve \
   --vlm-evaluator codex
 ```
@@ -286,6 +304,40 @@ npm run sidecar:test
 npm run build
 ```
 
+## Ablation study 재실행
+
+workflow 생성/실행 로직을 바꾸거나 page analysis, knowledge, `llm_browser_action`,
+JS export 성능을 확인해야 하면 고정된 ablation suite를 돌립니다.
+
+```bash
+cd /Users/mingukjang/git/spica_at_home/webmcp
+python3 core/scripts/run_ablation_studies.py --suite all
+```
+
+빠른 확인은 harder browser task와 memory ablation만 실행합니다.
+
+```bash
+python3 core/scripts/run_ablation_studies.py --suite fast
+```
+
+기존 raw 결과만 다시 모아 하나의 summary를 만들려면 실행을 건너뜁니다.
+
+```bash
+python3 core/scripts/run_ablation_studies.py --suite all --skip-run
+```
+
+산출물은 모두 ignored `core/outputs/**` 아래에 남습니다.
+
+- 통합 요약: `core/outputs/ablation_latest/consolidated_summary.md`
+- 통합 JSON: `core/outputs/ablation_latest/consolidated_results.json`
+- baseline raw: `core/outputs/ablation_study_20260610/results.json`
+- harder raw: `core/outputs/ablation_harder_20260610/results.json`
+- memory raw: `core/outputs/ablation_memory_20260610/results.json`
+
+Suite는 persistent 제품 DB인 `~/.webmcp-studio/db/workflows.sqlite`를 사용하지 않습니다.
+각 suite가 자체 throwaway SQLite DB와 local demo site를 만들기 때문에 운영 DB를
+오염시키지 않습니다.
+
 ## 장애 대응
 
 ### Tool list가 비어 있음
@@ -385,12 +437,18 @@ iframe, popup, `llm_browser_action`, VLM 평가는 Python `run-version --eval-an
 - `--live-page-text` 또는 `--eval-and-evolve`로 실제 page text가 수집됐는가.
 - `page_analyses` row가 URL key 기준으로 생겼는가.
 - `workflow_knowledge_entries`에 `script_generation` category row가 생겼는가.
+- 최근 `page_analyses.analysis_json`에 `wait_markers`, `verified_selectors`,
+  `dynamic_action_hints`, `verified_workflow_shape`가 들어갔는가.
+- 최근 `workflow_knowledge_entries.content_json`에 `url_shape`, `wait_markers`,
+  `verified_selectors`, `failure_modes`가 들어갔는가.
 
 ```bash
 sqlite3 ~/.webmcp-studio/db/workflows.sqlite \
   "select url_key, source, observation_count from page_analyses order by id desc limit 5;"
 sqlite3 ~/.webmcp-studio/db/workflows.sqlite \
   "select category, summary, source from workflow_knowledge_entries order by id desc limit 5;"
+sqlite3 ~/.webmcp-studio/db/workflows.sqlite \
+  "select json_extract(analysis_json, '$.wait_markers'), json_extract(analysis_json, '$.verified_selectors') from page_analyses order by id desc limit 1;"
 ```
 
 ## 운영 원칙

@@ -20,7 +20,7 @@ PROJECT_DOCS = [
     "webmcp/README.md",
     "webmcp/core/README.md",
     "webmcp/apps/desktop/README.md",
-    "webmcp/apps/desktop/src/script-preview/README.md",
+    "webmcp/apps/desktop/src/widgets/workflow-detail/model/script-preview/README.md",
     "webmcp/core/plugins/webwright-text-vision/skills/webwright/SKILL.md",
     "webmcp/core/plugins/webwright-text-vision/skills/webwright/commands/craft.md",
     "webmcp/core/plugins/webwright-text-vision/skills/webwright/commands/run.md",

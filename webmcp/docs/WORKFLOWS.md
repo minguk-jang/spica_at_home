@@ -97,6 +97,16 @@ reference/webwright/.venv/bin/python -m webworkflows.cli run-version \
 Desktop의 Create sheet나 CLI `create-workflow`는 start URL, 사용자 작업, 완료
 브라우저 상태를 받아 새 workflow를 만듭니다. 생성 전에는 어떤 argument가 필요한지
 모르므로 company/ticker 같은 domain-specific 입력을 받지 않습니다.
+작업이 너무 크거나 탐색 순서가 분명할 때는 선택적으로 Step guide를 함께 줄 수
+있습니다. Step guide는 사람이 적은 rough scaffold이며, Core는 이 순서와 의도를
+보존하되 실제 selector, wait marker, handler, assertion은 page evidence와 저장된
+memory로 채워야 합니다. Desktop에서는 Create sheet의 `Step guide` 섹션을 사용하고,
+CLI에서는 `--step-guide-json`에 JSON 배열을 전달합니다.
+Create sheet의 `Suggest Draft`는 같은 입력값과 저장된 page analysis/knowledge를
+Core `suggest-step-guide`에 보내 초안 step guide를 생성합니다. 기본 `--suggester codex`
+경로는 `codex exec`를 매번 띄우지 않고, VLM 평가와 같은 Codex app-server JSON-RPC
+경로를 사용합니다. 생성된 초안은 바로 수정 가능하며 drag/drop, up/down, duplicate,
+delete로 빠르게 다듬을 수 있습니다.
 
 ```mermaid
 flowchart LR
@@ -133,10 +143,55 @@ kebab-case로 만든 값입니다. 예를 들어
 iframe, locator 힌트와 짧은 evidence가 들어가며, 다음 synthesis prompt의
 `Reusable page analysis context JSON` 블록으로 전달됩니다.
 
+생성 실행이 끝나면 Core는 같은 URL key에 verified page analysis를 한 번 더
+upsert합니다. 이 후처리 단계는 생성된 workflow step, `step_runs.evidence_json`,
+eval/evolve 결과, 최종 output을 합쳐 `stable_markers`, `wait_markers`,
+`verified_selectors`, `dynamic_action_hints`, `verified_workflow_shape`,
+`observed_output_keys`, `failure_notes`를 보강합니다. 다음 생성은 단순히 `react`,
+`iframe` 같은 라벨만 보는 것이 아니라 실제로 통과한 selector, wait/assert marker,
+runtime LLM action 기준, output contract까지 재사용할 수 있습니다.
+
 URL에 종속되지 않는 생성 노하우는 `workflow_knowledge_entries`에 append-only
 형태로 쌓습니다. 생성 성공/실패 결과도 `script_generation` category의 노하우로
 저장되며, 이후 `create-workflow`와 page analysis 단계에서 최근 entry를 꺼내
 `Reusable script generation knowledge JSON`으로 전달합니다.
+생성 노하우도 verified page analysis를 기반으로 `url_shape`, `wait_markers`,
+`verified_selectors`, `dynamic_action_hints`, `failure_modes`를 저장합니다.
+
+### Memory ablation 기준
+
+Page analysis와 script-generation knowledge는 생성 prompt에 같이 들어가지만 효과는
+다르게 나타납니다. 2026-06-10 ablation에서는 multi-variant browser task 3개를
+`none`, `page_analysis_only`, `knowledge_only`, `page_analysis_plus_knowledge`로
+나눠 실행했습니다.
+
+결과 요약은 다음과 같습니다.
+
+- No memory: 3/9 success, 평균 12.94초.
+- Page analysis only: 3/9 success, 평균 12.82초.
+- Knowledge only: 9/9 success, 평균 3.54초.
+- Page analysis + knowledge: 9/9 success, 평균 3.52초.
+
+즉 현재 구현에서는 script-generation knowledge가 runtime dynamic action 선택을
+강하게 유도했고, page analysis만으로는 one-variant selector 실패를 피하지 못했습니다.
+또한 fresh trace의 `upsert_from_trace()`가 같은 URL key의 verified page analysis를
+generic 분석으로 덮어쓸 수 있으므로, verified `wait_markers`, `verified_selectors`,
+`dynamic_action_hints`를 보존하는 merge 개선이 필요합니다.
+
+같은 실험은 repo root에서 재실행합니다.
+
+```bash
+python3 core/scripts/run_ablation_studies.py --suite memory
+```
+
+전체 ablation은 다음 명령으로 실행합니다.
+
+```bash
+python3 core/scripts/run_ablation_studies.py --suite all
+```
+
+자세한 결과는 [ablation-study-memory-2026-06-10.md](ablation-study-memory-2026-06-10.md)를
+봅니다.
 
 Reviewed fixture 기반 memory도 같은 DB 구조를 사용합니다. `core/fixtures/workflow-memory`
 아래 JSONL 파일을 수정한 뒤 repo root에서 다음 명령을 실행합니다.
@@ -203,12 +258,23 @@ python3 -m webworkflows.cli eval-js-tool \
 ```
 
 ```bash
+python3 -m webworkflows.cli suggest-step-guide \
+  --db ~/.webmcp-studio/db/workflows.sqlite \
+  --start-url "https://www.google.com/flights" \
+  --task "Search for flights from SEA to JFK on 2026-08-15 to 2026-08-20" \
+  --final-state "Flight results for SEA to JFK are visible with outbound and return dates applied." \
+  --suggester codex \
+  --synthesizer-model gpt-5.5
+```
+
+```bash
 python3 -m webworkflows.cli create-workflow \
   --db outputs/webmcp_workflows/workflows.sqlite \
   --output-dir outputs/desktop_runs \
   --start-url "https://www.google.com/flights" \
   --task "Search for flights from SEA to JFK on 2026-08-15 to 2026-08-20" \
-  --final-state "SEA to JFK flight results are visible" \
+  --final-state "Flight results for SEA to JFK are visible with outbound and return dates applied." \
+  --step-guide-json '[{"name":"open_flights","description":"Open Google Flights.","step_type":"goto"},{"name":"set_route","description":"Set SEA as origin and JFK as destination.","step_type":"fill"},{"name":"wait_results","description":"Wait for SEA to JFK results.","step_type":"wait_for_text"}]' \
   --eval-and-evolve \
   --vlm-evaluator codex
 ```
@@ -237,10 +303,10 @@ flowchart LR
   Evolve --> NextVersion
 ```
 
-Codex 세션 안에서는 `--synthesizer agent-json` 경로를 우선합니다. 이 방식은
-활성 Codex 모델이 직접 `workflow.json`을 작성하고, local materializer가 그것을
-DB에 반영합니다. `--synthesizer codex`는 nested `codex exec`를 실행하므로
-명시적인 standalone fallback 테스트에만 사용합니다.
+Codex 세션 안에서는 두 생성 경로를 사용할 수 있습니다. `--synthesizer agent-json`은
+활성 Codex 모델이 직접 작성한 `workflow.json`을 local materializer가 DB에 반영합니다.
+`--synthesizer codex`는 Codex app-server JSON-RPC를 사용하므로 nested `codex exec`를
+실행하지 않습니다.
 
 ## Eval and evolve loop
 

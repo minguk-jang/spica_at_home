@@ -5,7 +5,7 @@ import {
   getRunEventResult,
   getWorkflowRunResult,
   summarizeRunOutput
-} from "../src/runResultSummary.ts";
+} from "../src/entities/run/model/runResultSummary.ts";
 
 test("extracts visible result details from a finished run event", () => {
   const result = getRunEventResult({

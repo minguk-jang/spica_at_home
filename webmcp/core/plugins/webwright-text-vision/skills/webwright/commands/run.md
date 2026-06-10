@@ -34,8 +34,9 @@ python3 -m webworkflows.cli intelligent-cold-init \
   --workflow-json-file "<workspace>/workflow.json"
 ```
 
-Codex 세션 안에서 `--synthesizer codex`를 사용하지 않습니다.
-Do not use `--synthesizer codex` from inside Codex.
+Core가 synthesis를 맡아야 하면 `--synthesizer codex`를 사용할 수 있습니다. 이
+경로는 Codex app-server JSON-RPC를 사용해야 하며 nested `codex exec`를 시작하면
+안 됩니다.
 
 Task:
 

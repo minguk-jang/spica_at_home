@@ -269,6 +269,12 @@ export type EvolveWorkflowPayload = {
   evalBrowser?: "chromium" | "firefox" | "webkit";
 };
 
+export type WorkflowStepGuideItem = {
+  name: string;
+  description: string;
+  step_type: string;
+};
+
 export type CreateWorkflowPayload = {
   dbPath: string;
   repoRoot: string;
@@ -281,6 +287,18 @@ export type CreateWorkflowPayload = {
   headed?: boolean;
   synthesizerModel?: string;
   evalBrowser?: "chromium" | "firefox" | "webkit";
+  stepGuide?: WorkflowStepGuideItem[];
+};
+
+export type StepGuideSuggestionPayload = {
+  dbPath: string;
+  repoRoot: string;
+  pythonPath?: string;
+  startUrl: string;
+  task: string;
+  finalState: string;
+  synthesizerModel?: string;
+  suggester?: "codex" | "heuristic";
 };
 
 export type JsToolExportPayload = {
@@ -342,6 +360,7 @@ declare global {
       watchVersion: (payload: RunPayload) => Promise<unknown>;
       evolveWorkflow: (payload: EvolveWorkflowPayload) => Promise<unknown>;
       createWorkflow: (payload: CreateWorkflowPayload) => Promise<unknown>;
+      suggestStepGuide: (payload: StepGuideSuggestionPayload) => Promise<RunEvent>;
       exportJsTool: (payload: JsToolExportPayload) => Promise<RunEvent>;
       runJsTool: (payload: JsToolRunPayload) => Promise<RunEvent>;
       evalJsTool: (payload: JsToolEvalPayload) => Promise<RunEvent>;

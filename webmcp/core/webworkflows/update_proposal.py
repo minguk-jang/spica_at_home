@@ -10,9 +10,9 @@ from webworkflows.loader import WorkflowSkill, WorkflowSkillLoader
 from webworkflows.providers.synthesis_provider import create_synthesis_backend
 from webworkflows.storage import WorkflowSkillStore, dumps, loads
 from webworkflows.synthesis import (
+    CodexAppServerSynthesisBackend,
     DEFAULT_CODEX_SYNTHESIS_MODEL,
     WORKFLOW_JSON_SCHEMA,
-    CodexCliSynthesisBackend,
     SynthesisBackend,
     bind_known_handlers,
     validate_workflow_json,
@@ -50,7 +50,7 @@ class WorkflowUpdateProposalService:
         cwd: str | Path | None = None,
     ):
         self.store = store
-        self.backend = backend or CodexCliSynthesisBackend(cwd=cwd)
+        self.backend = backend or CodexAppServerSynthesisBackend(cwd=cwd)
         self.model = model
 
     @property

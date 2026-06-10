@@ -9,7 +9,7 @@ allowed-tools: Bash, Read, Write, Edit, bash, read_file, write_file
 이 skill은 Codex 안에서 직접 Playwright를 실행해 웹 작업을 해결합니다. 기본
 경로로 standalone Python harness를 실행하지 않습니다. 특히 Codex 세션 안에서
 `codex exec`를 model backend처럼 다시 호출하면 시작이 느려지고 timeout 위험이
-커지므로 금지합니다.
+커지므로 금지합니다. Core LLM 호출이 필요하면 Codex app-server 경로를 사용합니다.
 
 정책 sentinel:
 
@@ -19,7 +19,7 @@ allowed-tools: Bash, Read, Write, Edit, bash, read_file, write_file
 - No nested Codex
 - Do not launch the standalone Python harness as the default path
 - WebMCP Workflow Optimization
-- Never use `--synthesizer codex` from inside Codex
+- Use Codex app-server for Core-managed Codex synthesis
 
 ## 원칙
 
@@ -82,8 +82,9 @@ python3 -m webworkflows.cli intelligent-cold-init \
   --workflow-json-file "<workspace>/workflow.json"
 ```
 
-Codex 세션 안에서 `--synthesizer codex`를 사용하지 않습니다. 그 경로는 nested
-`codex exec`를 시작하므로 standalone fallback harness에만 남깁니다.
+Codex 세션 안에서 Core가 직접 synthesis를 맡아야 하면 `--synthesizer codex`를
+사용합니다. 이 경로는 Codex app-server JSON-RPC를 사용해야 하며 nested
+`codex exec`를 시작하면 안 됩니다.
 
 ## Headed mode
 

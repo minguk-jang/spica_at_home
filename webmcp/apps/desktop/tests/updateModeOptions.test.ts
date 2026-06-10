@@ -5,7 +5,7 @@ import {
   UPDATE_MODE_OPTIONS,
   discoveryProviderForUpdateMode,
   updateModeFromDiscoveryProvider
-} from "../src/updateModeOptions.ts";
+} from "../src/features/update-workflow/model/updateModeOptions.ts";
 
 test("presents update modes in user-facing language", () => {
   assert.deepEqual(

@@ -208,6 +208,9 @@ class JavaScriptToolConversionTest(unittest.TestCase):
                 },
             )
             self.assertEqual("succeeded", generic["status"])
+            self.assertEqual("https://example.test/checkout", generic["output"]["final_url"])
+            self.assertIn("Checkout ready", generic["output"]["page_text"])
+            self.assertEqual("passed", generic["output"]["status"])
             self.assertIn("Checkout ready", generic["output"]["report_text"])
 
     def test_evaluates_javascript_tool_output_contract(self) -> None:
@@ -318,6 +321,57 @@ class JavaScriptToolConversionTest(unittest.TestCase):
             )
             eval_payload = json.loads(eval_completed.stdout)
             self.assertTrue(eval_payload["passed"])
+
+    def test_cli_run_js_tool_failure_returns_json_without_traceback(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = Path(tmp) / "tools.sqlite"
+            store = _seed_store(db_path)
+            export_root = Path(tmp) / "js-tools"
+
+            export_completed = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "webworkflows.cli",
+                    "export-js-tool",
+                    "--db",
+                    str(db_path),
+                    "--workflow-name",
+                    "generic_checkout_summary",
+                    "--version",
+                    "1",
+                    "--output-dir",
+                    str(export_root),
+                ],
+                text=True,
+                capture_output=True,
+                check=True,
+            )
+            exported = json.loads(export_completed.stdout)
+
+            run_completed = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "webworkflows.cli",
+                    "run-js-tool",
+                    "--tool-dir",
+                    exported["tool_dir"],
+                    "--argument",
+                    "start_url=https://example.test/checkout",
+                    "--argument",
+                    "page_text=Wrong page",
+                ],
+                text=True,
+                capture_output=True,
+            )
+
+            self.assertEqual(2, run_completed.returncode)
+            payload = json.loads(run_completed.stdout)
+            self.assertEqual("failed", payload["status"])
+            self.assertEqual("javascript_tool_failed", payload["error_type"])
+            self.assertIn("none of the expected text markers were found", payload["message"])
+            self.assertNotIn("Traceback", run_completed.stderr)
 
 
 def _seed_store(db_path: Path) -> WorkflowSkillStore:

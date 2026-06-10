@@ -194,6 +194,57 @@ test("core client creates workflow through Python CLI and emits creation events"
   assert.equal(events[1].type, "creation-finished");
 });
 
+test("core client suggests a guided step draft through Python CLI", async () => {
+  const calls = [];
+  const client = createWebmcpCoreClient({
+    repoRoot: "/repo/webmcp/core",
+    defaultOutputDir: "/repo/webmcp/core/outputs/desktop_runs",
+    defaultPythonPath: "/repo/webmcp/core/reference/webwright/.venv/bin/python",
+    pythonExists: () => true,
+    collectProcess: async (command, args, options) => {
+      calls.push({ command, args, options });
+      return {
+        stdout: JSON.stringify({
+          status: "succeeded",
+          provider: "heuristic",
+          step_guide: [{ name: "open_start_url", description: "Open the page.", step_type: "goto" }]
+        }),
+        stderr: "",
+        exitCode: 0
+      };
+    },
+    now: () => "2026-06-09T00:00:00.000Z",
+    nowMs: (() => {
+      let value = 3500;
+      return () => {
+        value += 13;
+        return value;
+      };
+    })()
+  });
+
+  const events = [];
+  const job = await client.suggestStepGuide({
+    sender: { send: (_channel, event) => events.push(event) },
+    payload: {
+      dbPath: "/tmp/workflows.sqlite",
+      repoRoot: "/repo/webmcp/core",
+      startUrl: "https://www.google.com/flights",
+      task: "Search flights from SEA to JFK",
+      finalState: "Flight result list is visible",
+      synthesizerModel: "gpt-5.5"
+    }
+  });
+
+  assert.equal(calls[0].command, "/repo/webmcp/core/reference/webwright/.venv/bin/python");
+  assert.deepEqual(calls[0].args.slice(0, 4), ["-m", "webworkflows.cli", "suggest-step-guide", "--db"]);
+  assert.equal(calls[0].args[calls[0].args.indexOf("--suggester") + 1], "codex");
+  assert.equal(calls[0].options.cwd, "/repo/webmcp/core");
+  assert.equal(job.output.step_guide[0].name, "open_start_url");
+  assert.equal(events[0].type, "step-guide-suggestion-started");
+  assert.equal(events[1].type, "step-guide-suggestion-finished");
+});
+
 test("core client exports a workflow version as a JavaScript tool", async () => {
   const calls = [];
   const client = createWebmcpCoreClient({

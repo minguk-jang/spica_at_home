@@ -98,6 +98,24 @@ cd webmcp/core
 python3 -m unittest tests/test_repo_structure.py tests/test_workflow_runtime_service.py tests/test_workflow_update_runtime_service.py tests/test_synthesis_provider_port.py tests/test_workflow_tools.py tests/test_js_tool_conversion.py tests/test_text_default_vision_fallback.py
 ```
 
+고정된 ablation study suite 실행:
+
+```bash
+cd webmcp
+python3 core/scripts/run_ablation_studies.py --suite all
+```
+
+시간이 부족하면 harder browser task와 memory ablation만 다시 돌립니다.
+
+```bash
+python3 core/scripts/run_ablation_studies.py --suite fast
+```
+
+이 스크립트는 persistent DB를 쓰지 않고 `core/outputs/ablation_*` 아래 격리 DB,
+로컬 demo site, browser artifact를 생성합니다. 통합 요약은
+`core/outputs/ablation_latest/consolidated_summary.md`와
+`core/outputs/ablation_latest/consolidated_results.json`에 남습니다.
+
 DB에 저장된 workflow tool을 JavaScript tool로 변환:
 
 ```bash
@@ -164,6 +182,9 @@ npm run db:sync-naver
 - [개발 가이드](docs/DEVELOPMENT.md): 설치, 실행, 검증 명령.
 - [Desktop 앱](docs/DESKTOP_APP.md): UI, IPC, sidecar, 실행/수정 동작.
 - [워크플로우](docs/WORKFLOWS.md): DB 구조, step, handler, cold init.
+- [Ablation baseline](docs/ablation-study-2026-06-10.md): 저장 workflow, JS export, dynamic action 기본 비교.
+- [Ablation harder](docs/ablation-study-harder-2026-06-10.md): multi-variant browser task 비교.
+- [Ablation memory](docs/ablation-study-memory-2026-06-10.md): page analysis/knowledge memory with/without 비교.
 - [계획 문서](docs/plans/): 설계와 구현 계획의 이력.
 
 ## 소스 규칙

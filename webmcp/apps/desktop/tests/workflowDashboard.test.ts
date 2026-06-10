@@ -9,7 +9,7 @@ import {
   canCreateWorkflow,
   findLatestDraftProposal,
   storedRunDisplayStatus
-} from "../src/workflowDashboard.ts";
+} from "../src/features/create-workflow/model/workflowDashboard.ts";
 import type { WorkflowExample, WorkflowStep, WorkflowUpdateProposal } from "../src/vite-env";
 
 test("builds ordered user-facing step cards for the selected version", () => {
@@ -166,7 +166,12 @@ test("builds create workflow payload without domain-specific arguments and hides
     task: " Search flights from SEA to JFK ",
     finalState: " Flight results are visible ",
     headed: true,
-    synthesizerModel: "gpt-5.5"
+    synthesizerModel: "gpt-5.5",
+    stepGuide: [
+      { name: " open_flights ", description: " Open Google Flights ", stepType: " goto " },
+      { name: " ", description: " ", stepType: "click" },
+      { name: "wait_results", description: "Wait for SEA to JFK results", stepType: "wait_for_text" }
+    ]
   });
 
   assert.deepEqual(payload, {
@@ -180,7 +185,11 @@ test("builds create workflow payload without domain-specific arguments and hides
     maxAttempts: 10,
     headed: true,
     synthesizerModel: "gpt-5.5",
-    evalBrowser: "chromium"
+    evalBrowser: "chromium",
+    stepGuide: [
+      { name: "open_flights", description: "Open Google Flights", step_type: "goto" },
+      { name: "wait_results", description: "Wait for SEA to JFK results", step_type: "wait_for_text" }
+    ]
   });
 });
 

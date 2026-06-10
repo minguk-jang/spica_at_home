@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { generatePlaywrightScriptPreview } from "../src/script-preview/playwrightPreview.ts";
-import { getStepScriptDescriptor } from "../src/script-preview/stepDescriptors.ts";
+import { generatePlaywrightScriptPreview } from "../src/widgets/workflow-detail/model/script-preview/playwrightPreview.ts";
+import { getStepScriptDescriptor } from "../src/widgets/workflow-detail/model/script-preview/stepDescriptors.ts";
 import type { WorkflowHandler, WorkflowResource, WorkflowStep } from "../src/vite-env";
 
 const baseStep: WorkflowStep = {

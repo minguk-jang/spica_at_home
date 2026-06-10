@@ -8,7 +8,7 @@ from typing import Any, Protocol
 
 from webworkflows.dynamic_browser import (
     DYNAMIC_BROWSER_ACTION_STEP_TYPE,
-    CodexCliDynamicBrowserActionPlanner,
+    CodexAppServerDynamicBrowserActionPlanner,
     DynamicBrowserActionPlanner,
     collect_dynamic_page_context,
     execute_dynamic_browser_action,
@@ -438,7 +438,7 @@ class PlaywrightEvalAndEvolveLoop:
     def _dynamic_action_planner(self) -> DynamicBrowserActionPlanner:
         planner = getattr(self, "dynamic_action_planner", None)
         if planner is None:
-            planner = CodexCliDynamicBrowserActionPlanner()
+            planner = CodexAppServerDynamicBrowserActionPlanner()
             self.dynamic_action_planner = planner
         return planner
 

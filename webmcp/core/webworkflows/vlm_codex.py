@@ -60,6 +60,20 @@ class CodexAppServerVisionLanguageEvaluator:
         self.app_server = app_server or CodexAppServerJsonRpcClient(
             cwd=self.cwd,
             timeout_seconds=timeout_seconds,
+            client_info={
+                "name": "webmcp-core-vlm",
+                "title": "WebMCP Core VLM",
+                "version": "0.1.0",
+            },
+            base_instructions=(
+                "You are only a JSON evaluator for browser workflow evidence. "
+                "Do not use tools, shell commands, file reads, skills, web, or repo context."
+            ),
+            developer_instructions=(
+                "Evaluate only the user-provided text and image inputs. "
+                "Return only JSON matching the provided schema."
+            ),
+            request_error_message="WebMCP VLM evaluator does not handle requests",
         )
 
     def evaluate(self, snapshot: EvaluationSnapshot, criteria: dict[str, Any]) -> StepEvaluation:
@@ -96,10 +110,30 @@ class CodexAppServerJsonRpcClient:
         codex_bin: str = "codex",
         cwd: str | Path | None = None,
         timeout_seconds: int = 180,
+        client_info: dict[str, str] | None = None,
+        base_instructions: str | None = None,
+        developer_instructions: str | None = None,
+        config: dict[str, Any] | None = None,
+        request_error_message: str = "WebMCP Codex app-server JSON client does not handle requests",
     ):
         self.codex_bin = codex_bin
         self.cwd = Path(cwd) if cwd else Path(tempfile.gettempdir())
         self.timeout_seconds = timeout_seconds
+        self.client_info = client_info or {
+            "name": "webmcp-core-json",
+            "title": "WebMCP Core JSON",
+            "version": "0.1.0",
+        }
+        self.base_instructions = base_instructions or (
+            "You are only a JSON generator for WebMCP core. "
+            "Do not use tools, shell commands, file reads, skills, web, or repo context."
+        )
+        self.developer_instructions = developer_instructions or "Return only JSON matching the provided schema."
+        self.config = config or {
+            "model_verbosity": "low",
+            "model_reasoning_summary": "none",
+        }
+        self.request_error_message = request_error_message
         self.process: subprocess.Popen[str] | None = None
         self._next_id = 1
 
@@ -135,7 +169,7 @@ class CodexAppServerJsonRpcClient:
         while time.time() < deadline:
             message = self._read_message(deadline)
             if _is_request(message):
-                self._send_error(str(message["id"]), code=-32601, message="WebMCP VLM evaluator does not handle requests")
+                self._send_error(str(message["id"]), code=-32601, message=self.request_error_message)
                 continue
             if message.get("method") == "item/completed":
                 text = _agent_message_text([message], thread_id=thread_id, turn_id=turn_id)
@@ -180,11 +214,7 @@ class CodexAppServerJsonRpcClient:
         initialize_id = self._send_request(
             "initialize",
             {
-                "clientInfo": {
-                    "name": "webmcp-core-vlm",
-                    "title": "WebMCP Core VLM",
-                    "version": "0.1.0",
-                },
+                "clientInfo": self.client_info,
                 "capabilities": {
                     "experimentalApi": True,
                     "requestAttestation": False,
@@ -209,18 +239,9 @@ class CodexAppServerJsonRpcClient:
                 "approvalPolicy": "never",
                 "sandbox": "read-only",
                 "ephemeral": True,
-                "baseInstructions": (
-                    "You are only a JSON evaluator for browser workflow evidence. "
-                    "Do not use tools, shell commands, file reads, skills, web, or repo context."
-                ),
-                "developerInstructions": (
-                    "Evaluate only the user-provided text and image inputs. "
-                    "Return only JSON matching the provided schema."
-                ),
-                "config": {
-                    "model_verbosity": "low",
-                    "model_reasoning_summary": "none",
-                },
+                "baseInstructions": self.base_instructions,
+                "developerInstructions": self.developer_instructions,
+                "config": self.config,
             },
         )
         result, _events = self._read_response(response_id, timeout_seconds=30)
@@ -295,7 +316,7 @@ class CodexResponsesVisionLanguageEvaluator:
         if not self.api_key:
             raise RuntimeError(
                 "OPENAI_API_KEY is required for Codex Responses VLM evaluation. "
-                "This path uses the OpenAI Responses API directly instead of spawning `codex exec`."
+                "This optional path uses the OpenAI Responses API directly; the default evaluator uses Codex app-server."
             )
         response = self.http_post(
             self.endpoint,
@@ -314,81 +335,6 @@ class CodexResponsesVisionLanguageEvaluator:
             evaluator_name=self.name,
             model=self.model,
             evidence_extra={"openai_response_id": response.get("id", "")},
-        )
-
-
-class CodexCliVisionLanguageEvaluator:
-    name = "codex_cli"
-
-    def __init__(
-        self,
-        *,
-        model: str = "gpt-5.5",
-        cwd: str | Path | None = None,
-        timeout_seconds: int = 180,
-        run_command: Callable[..., subprocess.CompletedProcess[str]] | None = None,
-    ):
-        self.model = model
-        self.cwd = Path(cwd) if cwd else None
-        self.timeout_seconds = timeout_seconds
-        self.run_command = run_command or subprocess.run
-
-    def evaluate(self, snapshot: EvaluationSnapshot, criteria: dict[str, Any]) -> StepEvaluation:
-        with tempfile.TemporaryDirectory() as tmp:
-            tmp_path = Path(tmp)
-            schema_path = tmp_path / "vlm_response_schema.json"
-            output_path = tmp_path / "vlm_response.json"
-            schema_path.write_text(json.dumps(CODEX_VLM_RESPONSE_SCHEMA, ensure_ascii=False), encoding="utf-8")
-            command = [
-                "codex",
-                "exec",
-                "--model",
-                self.model,
-                "--ephemeral",
-                "--ignore-rules",
-                "--ignore-user-config",
-                "--sandbox",
-                "read-only",
-                "--output-schema",
-                str(schema_path),
-                "--output-last-message",
-                str(output_path),
-            ]
-            screenshot_path = Path(snapshot.screenshot_path) if snapshot.screenshot_path else None
-            if screenshot_path and screenshot_path.is_file():
-                command.extend(["--image", str(screenshot_path)])
-            prompt = _build_codex_vlm_prompt(snapshot, criteria)
-
-            try:
-                completed = self.run_command(
-                    command,
-                    input=prompt,
-                    cwd=str(self.cwd) if self.cwd else None,
-                    text=True,
-                    capture_output=True,
-                    timeout=self.timeout_seconds,
-                    check=True,
-                )
-            except subprocess.CalledProcessError as exc:
-                raise RuntimeError(
-                    "codex VLM evaluation failed "
-                    f"(exit={exc.returncode}, model={self.model}).\n"
-                    f"STDERR:\n{exc.stderr}\nSTDOUT:\n{exc.stdout}"
-                ) from exc
-
-            raw_output = output_path.read_text(encoding="utf-8") if output_path.exists() else completed.stdout
-
-        parsed = json.loads(_extract_json(raw_output))
-        return _step_evaluation_from_model_json(
-            parsed,
-            snapshot,
-            criteria,
-            evaluator_name=self.name,
-            model=self.model,
-            evidence_extra={
-                "codex_stdout": completed.stdout[-2000:],
-                "codex_stderr": completed.stderr[-2000:],
-            },
         )
 
 

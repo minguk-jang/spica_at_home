@@ -13,7 +13,12 @@ from webworkflows.cold_init_types import ArtifactTrace
 from webworkflows.eval_loop import EvalAndEvolveLoop
 from webworkflows.executor import WorkflowExecutor
 from webworkflows.loader import WorkflowSkillLoader
-from webworkflows.page_memory import PageAnalysisStore, WorkflowKnowledgeStore, build_script_generation_knowledge
+from webworkflows.page_memory import (
+    PageAnalysisStore,
+    WorkflowKnowledgeStore,
+    enrich_page_analysis_with_workflow_evidence,
+    build_script_generation_knowledge,
+)
 from webworkflows.services.evolution_runtime import WorkflowEvolutionRuntime
 from webworkflows.storage import WorkflowSkillStore, dumps, loads
 from webworkflows.synthesis import DEFAULT_CODEX_SYNTHESIS_MODEL
@@ -227,6 +232,7 @@ class WorkflowCreationRuntime:
             status: str
             created_version_id = version_id
             created_workflow_version = skill.version
+            memory_skill = skill
 
             if self.evaluation_loop:
                 evolution_payload = WorkflowEvolutionRuntime(
@@ -251,6 +257,7 @@ class WorkflowCreationRuntime:
                     final_skill = loader.load_skill_version(skill.name, int(evolution_payload["final_version"]))
                     created_version_id = final_skill.version_id
                     created_workflow_version = final_skill.version
+                    memory_skill = final_skill
                 run_payload = {
                     "evolution": evolution_payload,
                     "output": _load_run_output(self.store, workflow_run_id),
@@ -270,6 +277,14 @@ class WorkflowCreationRuntime:
                     "output": run_result.output,
                     "report_path": run_result.report_path,
                 }
+
+            verified_page_analysis = self._record_verified_page_analysis(
+                start_url=start_url,
+                trace=trace,
+                skill=memory_skill,
+                workflow_run_id=workflow_run_id,
+                run_payload=run_payload,
+            )
 
             if status == "succeeded":
                 self._publish_created_workflow(skill_id=skill_id, version_id=created_version_id)
@@ -291,7 +306,7 @@ class WorkflowCreationRuntime:
                 user_task=user_task,
                 final_state=final_state,
                 run_payload=run_payload,
-                page_analysis=trace.page_analysis_context if trace else None,
+                page_analysis=verified_page_analysis or (trace.page_analysis_context if trace else None),
             )
 
             self._finish_attempt(
@@ -393,6 +408,9 @@ class WorkflowCreationRuntime:
         run_payload: dict[str, Any],
         page_analysis: dict[str, Any] | None,
     ) -> None:
+        analysis_payload = page_analysis
+        if isinstance(page_analysis, dict) and isinstance(page_analysis.get("analysis"), dict):
+            analysis_payload = page_analysis["analysis"]
         knowledge = build_script_generation_knowledge(
             status=status,
             workflow_name=workflow_name,
@@ -401,10 +419,53 @@ class WorkflowCreationRuntime:
             user_task=user_task,
             final_state=final_state,
             output_keys=sorted((run_payload.get("output") or {}).keys()),
-            page_analysis=page_analysis,
+            page_analysis=analysis_payload,
             error=run_payload.get("error"),
         )
         WorkflowKnowledgeStore(self.store).append(**knowledge)
+
+    def _record_verified_page_analysis(
+        self,
+        *,
+        start_url: str,
+        trace: ArtifactTrace,
+        skill,
+        workflow_run_id: int | None,
+        run_payload: dict[str, Any],
+    ) -> dict[str, Any] | None:
+        base_context = trace.page_analysis_context or {}
+        base_analysis = base_context.get("analysis") if isinstance(base_context, dict) else {}
+        run_output = run_payload.get("output") if isinstance(run_payload.get("output"), dict) else {}
+        enriched_analysis = enrich_page_analysis_with_workflow_evidence(
+            base_analysis=base_analysis if isinstance(base_analysis, dict) else {},
+            workflow_steps=list(skill.steps),
+            run_output=run_output,
+            step_runs=self._step_run_summaries(workflow_run_id),
+            evaluation=run_payload.get("evolution") if isinstance(run_payload.get("evolution"), dict) else None,
+        )
+        final_url = str(run_output.get("final_url") or run_output.get("current_url") or trace.final_url or "")
+        evidence = {
+            "provider": trace.provider,
+            "source": "workflow_creation_verified",
+            "workflow_name": skill.name,
+            "workflow_version": skill.version,
+            "workflow_run_id": workflow_run_id,
+            "final_url": final_url,
+            "title": str(run_output.get("page_title") or trace.title or ""),
+            "page_text_excerpt": str(run_output.get("page_text") or trace.page_text or "")[:1000],
+            "output_keys": sorted(run_output.keys()),
+        }
+        record = PageAnalysisStore(self.store).upsert(
+            original_url=start_url,
+            title=str(run_output.get("page_title") or trace.title or ""),
+            framework_hints=list(enriched_analysis.get("framework_hints") or []),
+            frame_hints=list(enriched_analysis.get("frame_hints") or []),
+            locator_hints=list(enriched_analysis.get("locator_hints") or []),
+            analysis=enriched_analysis,
+            evidence=evidence,
+            source="workflow_creation_verified",
+        )
+        return record.as_context()
 
     def _create_session(
         self,
@@ -608,6 +669,33 @@ class WorkflowCreationRuntime:
         if row and row["duration_ms"] is not None:
             return int(row["duration_ms"])
         return fallback
+
+    def _step_run_summaries(self, run_id: int | None) -> list[dict[str, Any]]:
+        if run_id is None:
+            return []
+        with self.store.connect() as conn:
+            rows = conn.execute(
+                """
+                select sr.status, sr.evidence_json, sr.error_json,
+                       ws.name as step_name, ws.step_type, ws.order_index
+                from step_runs sr
+                join workflow_tool_steps ws on ws.id = sr.step_id
+                where sr.run_id = ?
+                order by ws.order_index, sr.id
+                """,
+                (run_id,),
+            ).fetchall()
+        return [
+            {
+                "step_name": row["step_name"],
+                "step_type": row["step_type"],
+                "order_index": int(row["order_index"]),
+                "status": row["status"],
+                "evidence": loads(row["evidence_json"], {}),
+                "error": loads(row["error_json"], None),
+            }
+            for row in rows
+        ]
 
 
 def _load_run_output(store: WorkflowSkillStore, run_id: int | None) -> dict[str, Any]:

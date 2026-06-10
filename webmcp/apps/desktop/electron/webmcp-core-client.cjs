@@ -7,7 +7,8 @@ const {
   buildPythonExportJsToolArgs,
   buildPythonProposeArgs,
   buildPythonRunArgs,
-  buildPythonRunJsToolArgs
+  buildPythonRunJsToolArgs,
+  buildPythonSuggestStepGuideArgs
 } = require("./update-command.cjs");
 const {
   collectProcess: defaultCollectProcess,
@@ -185,6 +186,31 @@ function createWebmcpCoreClient(options) {
     return job;
   }
 
+  async function suggestStepGuide({ sender, payload }) {
+    const jobId = nextJobId++;
+    const startedAt = now();
+    const jobBase = {
+      jobId,
+      startUrl: payload.startUrl,
+      startedAt
+    };
+    emitRunEvent(sender, { type: "step-guide-suggestion-started", ...jobBase });
+    const result = await runPythonCli(
+      buildPythonSuggestStepGuideArgs(payload),
+      payload.repoRoot || repoRoot,
+      payload.pythonPath
+    );
+    const job = buildCliJobResult({
+      ...jobBase,
+      type: "step-guide-suggestion-finished",
+      result,
+      finishedAt: now(),
+      nowMs
+    });
+    emitRunEvent(sender, job);
+    return job;
+  }
+
   async function exportJsTool({ sender, payload }) {
     const jobId = nextJobId++;
     const startedAt = now();
@@ -306,6 +332,7 @@ function createWebmcpCoreClient(options) {
     runJsTool,
     runVersion,
     runVersionQueue,
+    suggestStepGuide,
     pythonCommand
   };
 

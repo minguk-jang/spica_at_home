@@ -2,8 +2,6 @@ from __future__ import annotations
 
 import json
 import re
-import subprocess
-import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol
@@ -62,55 +60,55 @@ class AgentJsonSynthesisBackend:
         return json.loads(self.workflow_json_path.read_text(encoding="utf-8"))
 
 
-class CodexCliSynthesisBackend:
-    provider = "codex_cli"
+class CodexAppServerSynthesisBackend:
+    provider = "codex_app_server"
 
     def __init__(
         self,
         *,
         cwd: str | Path | None = None,
-        timeout_seconds: int = 300,
-        run_command=subprocess.run,
+        timeout_seconds: int = 180,
+        app_server: Any | None = None,
     ):
         self.cwd = Path(cwd) if cwd else None
         self.timeout_seconds = timeout_seconds
-        self.run_command = run_command
+        self.app_server = app_server or self._new_app_server()
 
     def synthesize(self, *, prompt: str, schema: dict[str, Any], model: str) -> dict[str, Any]:
-        with tempfile.TemporaryDirectory() as tmp:
-            output_path = Path(tmp) / "workflow_output.json"
-            prompt_with_schema = _prompt_with_schema(prompt, schema)
-            command = [
-                "codex",
-                "exec",
-                "--model",
-                model,
-                "--ephemeral",
-                "--ignore-rules",
-                "--ignore-user-config",
-                "--sandbox",
-                "read-only",
-                "--output-last-message",
-                str(output_path),
-                prompt_with_schema,
-            ]
-            try:
-                completed = self.run_command(
-                    command,
-                    cwd=str(self.cwd) if self.cwd else None,
-                    text=True,
-                    capture_output=True,
-                    timeout=self.timeout_seconds,
-                    check=True,
-                )
-            except subprocess.CalledProcessError as exc:
-                raise RuntimeError(
-                    "codex exec synthesis failed "
-                    f"(exit={exc.returncode}, model={model}).\n"
-                    f"STDERR:\n{exc.stderr}\nSTDOUT:\n{exc.stdout}"
-                ) from exc
-            raw_output = output_path.read_text(encoding="utf-8") if output_path.exists() else completed.stdout
-        return json.loads(_extract_json(raw_output))
+        result = self.app_server.run_turn(
+            prompt=_prompt_with_schema(prompt, schema),
+            output_schema=schema,
+            image_paths=[],
+            model=model,
+        )
+        return json.loads(_extract_json(str(result.get("text") or "")))
+
+    def close(self) -> None:
+        close = getattr(self.app_server, "close", None)
+        if callable(close):
+            close()
+
+    def _new_app_server(self):
+        from webworkflows.vlm_codex import CodexAppServerJsonRpcClient
+
+        return CodexAppServerJsonRpcClient(
+            cwd=self.cwd,
+            timeout_seconds=self.timeout_seconds,
+            client_info={
+                "name": "webmcp-workflow-synthesis",
+                "title": "WebMCP Workflow Synthesis",
+                "version": "0.1.0",
+            },
+            base_instructions=(
+                "You synthesize reusable WebMCP workflow JSON from user-provided browser evidence. "
+                "Do not use tools, shell commands, file reads, skills, web, or repo context."
+            ),
+            developer_instructions=(
+                "Return only JSON matching the provided workflow schema. "
+                "Do not include Markdown, Python, JavaScript, or Playwright code."
+            ),
+            request_error_message="WebMCP workflow synthesizer does not handle requests",
+        )
 
 
 @dataclass(frozen=True)
@@ -127,7 +125,7 @@ class LLMWorkflowSynthesizer:
         backend: SynthesisBackend | None = None,
         model: str = DEFAULT_CODEX_SYNTHESIS_MODEL,
     ):
-        self.backend = backend or CodexCliSynthesisBackend()
+        self.backend = backend or CodexAppServerSynthesisBackend()
         self.model = model
 
     @property
@@ -172,6 +170,11 @@ def build_synthesis_prompt(trace: ArtifactTrace) -> str:
         ensure_ascii=False,
         sort_keys=True,
     )
+    step_guide_json = json.dumps(
+        _normalized_step_guide(trace.arguments.get("step_guide")),
+        ensure_ascii=False,
+        sort_keys=True,
+    )
     return (
         "You are synthesizing a reusable WebMCP workflow JSON for a browser workflow.\n"
         "Return only JSON matching the provided schema. Do not include Python code.\n"
@@ -196,6 +199,10 @@ def build_synthesis_prompt(trace: ArtifactTrace) -> str:
         "Python, Playwright code, script, or selectors produced by the runtime LLM in the workflow JSON; that code is "
         "generated at runtime only.\n"
         "Do not invent executable code. Store templates, handler refs, assertions, dynamic instructions, and static JSON only.\n\n"
+        "If Human-authored step guide JSON is non-empty, treat it as a scaffold: preserve the guide order "
+        "and intent, keep recognizable step names when valid, and translate rough step types/descriptions into "
+        "executable WebMCP steps using discovered page evidence. Fill missing selectors, actions, waits, "
+        "handlers, and assertions; do not copy vague guide text as the final assertion.\n\n"
         "For a Naver stock report, prefer these semantic steps: open_naver_stock_search, "
         "wait_stock_card, extract_stock_card, validate_stock_output, render_stock_report.\n\n"
         f"User request: {trace.user_request}\n"
@@ -205,6 +212,8 @@ def build_synthesis_prompt(trace: ArtifactTrace) -> str:
         f"Discovery provider: {trace.provider}\n"
         f"Final URL: {trace.final_url or ''}\n"
         f"Page title: {trace.title or ''}\n"
+        "Human-authored step guide JSON:\n"
+        f"{step_guide_json[:3000]}\n"
         "Reusable page analysis context JSON:\n"
         f"{page_analysis_context_json[:3000]}\n"
         "Reusable script generation knowledge JSON:\n"
@@ -212,6 +221,28 @@ def build_synthesis_prompt(trace: ArtifactTrace) -> str:
         "Page text excerpt:\n"
         f"{trace.page_text[:6000]}\n"
     )
+
+
+def _normalized_step_guide(value: Any) -> list[dict[str, str]]:
+    if not isinstance(value, list):
+        return []
+    guide: list[dict[str, str]] = []
+    for index, item in enumerate(value):
+        if not isinstance(item, dict):
+            continue
+        name = str(item.get("name") or "").strip()
+        description = str(item.get("description") or "").strip()
+        step_type = str(item.get("step_type") or item.get("stepType") or "").strip()
+        if not name and not description:
+            continue
+        guide.append(
+            {
+                "name": name or f"step_{index + 1}",
+                "description": description,
+                "step_type": step_type or "click",
+            }
+        )
+    return guide
 
 
 def validate_workflow_json(workflow: dict[str, Any]) -> None:

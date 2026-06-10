@@ -11,6 +11,7 @@ from webworkflows.eval_loop import EvalAndEvolveLoop
 from webworkflows.executor import WorkflowExecutor, WorkflowRunResult
 from webworkflows.loader import WorkflowSkill, WorkflowSkillLoader
 from webworkflows.cold_init_types import ArtifactTrace
+from webworkflows.page_memory import PageAnalysisStore, WorkflowKnowledgeStore
 from webworkflows.storage import WorkflowSkillStore, dumps
 
 
@@ -635,6 +636,7 @@ class IntelligentColdInitRunner:
         try:
             discovery_started = time.perf_counter()
             trace = self.trace_collector.collect(user_request, arguments)
+            trace = self._enrich_trace_with_page_memory(trace)
             discovery_duration_ms = _elapsed_ms(discovery_started)
 
             synthesis_started = time.perf_counter()
@@ -714,6 +716,15 @@ class IntelligentColdInitRunner:
                 error={"type": type(exc).__name__, "message": str(exc)},
             )
             raise
+
+    def _enrich_trace_with_page_memory(self, trace: ArtifactTrace) -> ArtifactTrace:
+        page_analysis = PageAnalysisStore(self.store).upsert_from_trace(trace, source="intelligent_cold_init")
+        knowledge_entries = WorkflowKnowledgeStore(self.store).recent(category="script_generation", limit=5)
+        return replace(
+            trace,
+            page_analysis_context=page_analysis.as_context(),
+            knowledge_context=[entry.as_context() for entry in knowledge_entries],
+        )
 
     def _create_cold_init_run(self, user_request: str, arguments: dict[str, Any]) -> int:
         with self.store.connect() as conn:

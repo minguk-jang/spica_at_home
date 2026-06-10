@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { normalizeWorkflowDetail } from "../src/workflowDetailDefaults.ts";
+import { normalizeWorkflowDetail } from "../src/entities/workflow/model/detailDefaults.ts";
 
 test("adds an empty proposal list to legacy workflow details", () => {
   const detail = normalizeWorkflowDetail({

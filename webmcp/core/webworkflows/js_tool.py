@@ -18,6 +18,10 @@ class ExportedJsTool:
     workflow_json: dict[str, Any]
 
 
+class JsToolRuntimeError(RuntimeError):
+    pass
+
+
 class JsToolExporter:
     def __init__(self, store: WorkflowSkillStore):
         self.store = store
@@ -54,16 +58,16 @@ def run_js_tool(tool_dir: str | Path, arguments: dict[str, Any], *, node_binary:
         capture_output=True,
     )
     if not completed.stdout.strip():
-        raise RuntimeError(
+        raise JsToolRuntimeError(
             f"javascript tool produced no JSON output (exit={completed.returncode}). stderr={completed.stderr}"
         )
     try:
         payload = json.loads(completed.stdout)
     except json.JSONDecodeError as exc:
-        raise RuntimeError(f"javascript tool returned invalid JSON: {completed.stdout}") from exc
+        raise JsToolRuntimeError(f"javascript tool returned invalid JSON: {completed.stdout}") from exc
     if completed.returncode != 0:
         message = payload.get("message") or payload.get("error") or completed.stderr
-        raise RuntimeError(f"javascript tool failed: {message}")
+        raise JsToolRuntimeError(f"javascript tool failed: {message}")
     return payload
 
 
@@ -129,7 +133,7 @@ function executeStep(step, context) {
   if (step.step_type === "goto") {
     const url = renderTemplate(String((step.action || {}).url_template || ""), context.arguments);
     context.url = url;
-    return { output: { url }, evidence: { url } };
+    return { output: { url, final_url: url }, evidence: { url } };
   }
 
   if (step.step_type === "llm_browser_action") {
@@ -203,6 +207,8 @@ function executeStep(step, context) {
     context.reportText = reportText;
     return {
       output: {
+        final_url: context.url || "",
+        page_text: context.pageText || "",
         report_text: reportText,
         report_markdown: reportText,
         markdown_report: reportText,
@@ -317,6 +323,7 @@ function templateValues(context) {
     ...(context.arguments || {}),
     ...(context.output || {}),
     page_text: context.pageText || "",
+    final_url: context.url || "",
     url: context.url || ""
   };
 }

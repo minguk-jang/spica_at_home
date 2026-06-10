@@ -1,4 +1,4 @@
-import type { WorkflowHandler, WorkflowStep } from "../vite-env";
+import type { WorkflowHandler, WorkflowStep } from "../../../../vite-env";
 import type { StepScriptDescriptor } from "./types";
 
 export function getStepScriptDescriptor(

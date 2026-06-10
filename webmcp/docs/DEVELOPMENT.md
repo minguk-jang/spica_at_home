@@ -88,6 +88,30 @@ reference/webwright/.venv/bin/python -m webworkflows.cli run-version \
   --live-page-text
 ```
 
+## Ablation benchmark
+
+Core behavior를 비교할 때는 고정된 ablation runner를 사용합니다.
+
+```bash
+cd webmcp
+python3 core/scripts/run_ablation_studies.py --suite all
+```
+
+개발 중 빠르게 확인하려면 다음만 돌립니다.
+
+```bash
+python3 core/scripts/run_ablation_studies.py --suite fast --quick
+```
+
+각 suite의 역할은 다음과 같습니다.
+
+- `baseline`: 저장 DB workflow 재사용, JS tool export, 기본 dynamic action 비교.
+- `harder`: multi-variant browser task에서 static selector와 runtime dynamic action 비교.
+- `memory`: page analysis와 script-generation knowledge 유무에 따른 synthesis/실행 성공률 비교.
+
+결과는 `core/outputs/ablation_latest/consolidated_summary.md`에 모입니다. 이 경로는
+ignored output이므로 benchmark 증거를 공유해야 할 때만 docs 보고서로 승격합니다.
+
 ## Ignore 기준
 
 ```mermaid

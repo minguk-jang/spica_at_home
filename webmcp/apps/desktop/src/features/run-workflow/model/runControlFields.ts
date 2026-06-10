@@ -1,4 +1,4 @@
-import type { WorkflowArgument } from "./vite-env";
+import type { WorkflowArgument } from "../../../vite-env";
 
 export type RunControlInputType = "text" | "number" | "checkbox";
 export type RunControlRole = "request" | "companyName" | "ticker" | "newsLimit" | "extraArgument";

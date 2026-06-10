@@ -148,6 +148,9 @@ function buildPythonCreateWorkflowArgs(payload, defaultOutputDir) {
   if (payload.newsLimit !== undefined && payload.newsLimit !== null) {
     args.push("--news-limit", String(payload.newsLimit));
   }
+  if (Array.isArray(payload.stepGuide) && payload.stepGuide.length > 0) {
+    args.push("--step-guide-json", JSON.stringify(payload.stepGuide));
+  }
   appendGenericArguments(args, payload);
   if (payload.headed) {
     args.push("--headed");
@@ -155,6 +158,26 @@ function buildPythonCreateWorkflowArgs(payload, defaultOutputDir) {
   args.push("--eval-and-evolve");
   appendEvalAndEvolveArgs(args, { ...payload, evalAndEvolve: true });
   return args;
+}
+
+function buildPythonSuggestStepGuideArgs(payload) {
+  return [
+    "-m",
+    "webworkflows.cli",
+    "suggest-step-guide",
+    "--db",
+    payload.dbPath,
+    "--start-url",
+    payload.startUrl,
+    "--task",
+    payload.task,
+    "--final-state",
+    payload.finalState,
+    "--suggester",
+    payload.suggester || "codex",
+    "--synthesizer-model",
+    payload.synthesizerModel || DEFAULT_CODEX_MODEL
+  ];
 }
 
 function buildPythonExportJsToolArgs(payload, defaultOutputDir) {
@@ -249,5 +272,6 @@ module.exports = {
   buildPythonExportJsToolArgs,
   buildPythonProposeArgs,
   buildPythonRunArgs,
-  buildPythonRunJsToolArgs
+  buildPythonRunJsToolArgs,
+  buildPythonSuggestStepGuideArgs
 };

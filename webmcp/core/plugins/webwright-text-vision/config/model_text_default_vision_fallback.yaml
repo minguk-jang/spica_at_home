@@ -1,23 +1,20 @@
-# Backwards-compatible alias for the fallback-only Codex OAuth harness mode.
+# Backwards-compatible alias for the Codex app-server text+vision fallback mode.
 #
 # Stack on top of base.yaml:
 #   python -m webwright.run.cli -c base.yaml -c model_text_default_vision_fallback.yaml ...
 #
-# Do not use this from inside an active Codex session unless explicitly testing
-# the standalone harness. The preferred Codex path is direct plugin execution or
-# WebMCP workflow materialization with `--synthesizer agent-json`.
+# This alias intentionally avoids nested Codex backends and uses
+# `codex app-server --stdio` through the codex_app_server model backend.
 # Screenshot-oriented fallback tools use `vision_model` when present.
 
 model:
-  model_class: codex_cli
+  model_class: codex_app_server
   model_name: gpt-5.5
-  codex_sandbox: workspace-write
-  request_timeout_seconds: 300
+  codex_sandbox: read-only
   attach_observation_screenshot: false
 
 vision_model:
-  model_class: codex_cli
+  model_class: codex_app_server
   model_name: gpt-5.5
-  codex_sandbox: workspace-write
-  request_timeout_seconds: 300
+  codex_sandbox: read-only
   attach_observation_screenshot: true

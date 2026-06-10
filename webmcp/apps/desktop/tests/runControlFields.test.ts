@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { buildVisibleRunControlFields } from "../src/runControlFields.ts";
+import { buildVisibleRunControlFields } from "../src/features/run-workflow/model/runControlFields.ts";
 import type { WorkflowArgument } from "../src/vite-env";
 
 test("run controls hide runtime path fields from users", () => {

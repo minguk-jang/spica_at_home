@@ -1,4 +1,4 @@
-import type { WorkflowDetail, WorkflowExample, WorkflowHandler, WorkflowUpdateProposal } from "./vite-env";
+import type { WorkflowDetail, WorkflowExample, WorkflowHandler, WorkflowUpdateProposal } from "../../../vite-env";
 
 type LegacyWorkflowDetail = Omit<WorkflowDetail, "handlers" | "examples" | "proposals"> & {
   handlers?: WorkflowHandler[];

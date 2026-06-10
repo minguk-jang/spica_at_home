@@ -112,7 +112,7 @@ Core에서는 `services/*.py`가 CLI와 future API server가 공유할 use case�
 flowchart LR
   UpdateRuntime["WorkflowUpdateRuntime"]
   Factory["create_synthesis_backend(name)"]
-  Codex["codex_cli"]
+  Codex["codex_app_server"]
   AgentJson["agent_json"]
   FutureOpenAI["future openai_compatible"]
   FutureClaude["future claude_code"]

@@ -4,7 +4,7 @@ import test from "node:test";
 import {
   summarizeEvolutionJobStatus,
   summarizeEvolutionOutput
-} from "../src/evolutionSummary.ts";
+} from "../src/features/evolve-workflow/model/evolutionSummary.ts";
 
 test("summarizes waiting-for-repair evolution output with visible artifacts", () => {
   const summary = summarizeEvolutionOutput({

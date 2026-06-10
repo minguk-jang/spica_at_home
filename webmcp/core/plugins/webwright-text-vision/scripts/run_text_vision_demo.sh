@@ -4,8 +4,8 @@ set -euo pipefail
 if [[ -z "${WEBWRIGHT_MODEL_CONFIG:-}" ]]; then
   cat >&2 <<'EOF'
 WEBWRIGHT_MODEL_CONFIG must be set for standalone harness runs.
-Use model_openai_compatible_text_vision.yaml when testing an OpenAI-compatible provider.
-Use model_codex_oauth_text_vision.yaml only when explicitly testing the nested codex_cli fallback.
+Use model_codex_oauth_text_vision.yaml to reuse the local Codex OAuth session through app-server.
+Use model_openai_compatible_text_vision.yaml only when explicitly testing an OpenAI-compatible provider.
 EOF
   exit 2
 fi

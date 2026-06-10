@@ -8,6 +8,7 @@ const {
   buildPythonEvolveArgs,
   buildPythonEvalJsToolArgs,
   buildPythonExportJsToolArgs,
+  buildPythonSuggestStepGuideArgs,
   buildPythonRunJsToolArgs,
   buildPythonProposeArgs,
   buildPythonRunArgs
@@ -193,7 +194,11 @@ test("create workflow args pass start URL task final state and Codex VLM default
       maxAttempts: 2,
       headed: true,
       synthesizerModel: "gpt-5.5",
-      evalBrowser: "chromium"
+      evalBrowser: "chromium",
+      stepGuide: [
+        { name: "open_flights", description: "Open Google Flights", step_type: "goto" },
+        { name: "wait_results", description: "Wait for visible results", step_type: "wait_for_text" }
+      ]
     },
     "/tmp/default-runs"
   );
@@ -204,10 +209,33 @@ test("create workflow args pass start URL task final state and Codex VLM default
   assert.equal(args[args.indexOf("--task") + 1], "Search flights from SEA to JFK");
   assert.equal(args[args.indexOf("--final-state") + 1], "Flight result list is visible");
   assert.equal(args[args.indexOf("--max-attempts") + 1], "10");
+  const guideArg = args[args.indexOf("--step-guide-json") + 1];
+  assert.equal(JSON.parse(guideArg)[0].name, "open_flights");
+  assert.equal(JSON.parse(guideArg)[1].step_type, "wait_for_text");
   assert.equal(args[args.indexOf("--synthesizer") + 1], "codex");
   assert.equal(args.includes("--headed"), true);
   assert.equal(args.includes("--eval-and-evolve"), true);
   assert.equal(args[args.indexOf("--vlm-evaluator") + 1], "codex");
+});
+
+test("step guide suggestion args use Codex with the selected creation context", () => {
+  const args = buildPythonSuggestStepGuideArgs({
+    dbPath: "/tmp/workflows.sqlite",
+    repoRoot: "/repo/webmcp/core",
+    startUrl: "https://www.google.com/flights",
+    task: "Search flights from SEA to JFK",
+    finalState: "Flight result list is visible",
+    synthesizerModel: "gpt-5.5"
+  });
+
+  assert.equal(args[0], "-m");
+  assert.equal(args[2], "suggest-step-guide");
+  assert.equal(args[args.indexOf("--db") + 1], "/tmp/workflows.sqlite");
+  assert.equal(args[args.indexOf("--start-url") + 1], "https://www.google.com/flights");
+  assert.equal(args[args.indexOf("--task") + 1], "Search flights from SEA to JFK");
+  assert.equal(args[args.indexOf("--final-state") + 1], "Flight result list is visible");
+  assert.equal(args[args.indexOf("--suggester") + 1], "codex");
+  assert.equal(args[args.indexOf("--synthesizer-model") + 1], "gpt-5.5");
 });
 
 test("export JS tool args write selected workflow version to a js_tools output folder", () => {

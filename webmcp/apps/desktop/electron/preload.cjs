@@ -11,6 +11,7 @@ contextBridge.exposeInMainWorld("webmcp", {
   watchVersion: (payload) => ipcRenderer.invoke("webmcp:watch-version", payload),
   evolveWorkflow: (payload) => ipcRenderer.invoke("webmcp:evolve-workflow", payload),
   createWorkflow: (payload) => ipcRenderer.invoke("webmcp:create-workflow", payload),
+  suggestStepGuide: (payload) => ipcRenderer.invoke("webmcp:suggest-step-guide", payload),
   exportJsTool: (payload) => ipcRenderer.invoke("webmcp:export-js-tool", payload),
   runJsTool: (payload) => ipcRenderer.invoke("webmcp:run-js-tool", payload),
   evalJsTool: (payload) => ipcRenderer.invoke("webmcp:eval-js-tool", payload),

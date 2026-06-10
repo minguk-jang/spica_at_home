@@ -6,7 +6,7 @@ from typing import Any
 
 from webworkflows.synthesis import (
     AgentJsonSynthesisBackend,
-    CodexCliSynthesisBackend,
+    CodexAppServerSynthesisBackend,
     FakeSynthesisBackend,
     SynthesisBackend,
 )
@@ -20,7 +20,7 @@ def create_synthesis_backend(
     cwd: str | Path | None = None,
 ) -> SynthesisBackend:
     if name == "codex":
-        return CodexCliSynthesisBackend(cwd=cwd)
+        return CodexAppServerSynthesisBackend(cwd=cwd)
     if name == "agent-json":
         if not workflow_json_file:
             raise ValueError("--workflow-json-file is required with --synthesizer agent-json")

@@ -5,7 +5,7 @@ import {
   activeJobControlLabel,
   activeJobStatusText,
   activeJobTitle
-} from "../src/activeJob.ts";
+} from "../src/features/active-job/model/activeJob.ts";
 
 test("describes active Codex jobs with operation-specific labels", () => {
   assert.equal(

@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import argparse
+import contextlib
+import io
 import json
 import sqlite3
 import subprocess
@@ -7,14 +10,19 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from webworkflows.services.creation_runtime import WorkflowCreationRuntime
 from webworkflows.eval_loop import StepEvaluation, WorkflowEvaluationReport
-from webworkflows.cold_init import WorkflowMaterializer, discovery_from_workflow_json
+from webworkflows.cold_init import (
+    IntelligentColdInitRunner,
+    StaticTraceCollector,
+    WorkflowMaterializer,
+    discovery_from_workflow_json,
+)
 from webworkflows.page_memory import PageAnalysisStore, WorkflowKnowledgeStore
 from webworkflows.storage import WorkflowSkillStore
 from webworkflows.synthesis import (
-    CodexCliSynthesisBackend,
     FakeSynthesisBackend,
     LLMWorkflowSynthesizer,
     build_synthesis_prompt,
@@ -39,6 +47,76 @@ SEA to JFK
 Sat, Aug 15
 Thu, Aug 20
 Best departing flights
+"""
+
+BOOKS_HOME_TEXT = """
+Books to Scrape We love being scraped!
+Home All products
+Books
+Travel
+Mystery
+Historical Fiction
+All products
+1000 results - showing 1 to 20.
+"""
+
+BOOKS_PRODUCT_TEXT = """
+Books to Scrape We love being scraped!
+Home Books Mystery
+Page 2 of 2
+The Mysterious Affair at Styles (Hercule Poirot #1)
+£24.80
+In stock (6 available)
+Product Description
+Product Information
+UPC 2da5edf8b5776c9a
+Price (excl. tax) £24.80
+Availability In stock
+"""
+
+DYNAMIC_CONTROLS_TEXT = """
+Dynamic Controls
+Remove/add
+A checkbox
+Remove
+Enable/disable
+Enable
+Powered by Elemental Selenium
+"""
+
+DYNAMIC_CONTROLS_FINAL_TEXT = """
+Dynamic Controls
+Remove/add
+Remove
+It's back!
+A checkbox
+Enable/disable
+Enable
+Powered by Elemental Selenium
+"""
+
+DYNAMIC_AD_TEXT = """
+Quarterly Launch Checklist
+The campaign checklist is ready for review.
+Dismiss the current sponsored placement.
+Complete the launch review form after the ad is gone.
+Ad visible
+Begin launch review
+Ad panel
+No thanks
+"""
+
+DYNAMIC_AD_FINAL_TEXT = """
+Quarterly Launch Checklist
+The campaign checklist is ready for review.
+Ad dismissed
+Begin launch review
+Launch review
+Reviewer name
+Copy approved
+Budget approved
+Complete review
+Launch review complete for Mina
 """
 
 NAVER_HOME_TEXT = """
@@ -170,6 +248,301 @@ def generic_flight_workflow_json() -> dict:
     }
 
 
+def books_mystery_workflow_json() -> dict:
+    return {
+        "skill_name": "verified_books_mystery_page2_product_report",
+        "slug": "verified-books-mystery-page2-product-report",
+        "description": "Navigate Books to Scrape Mystery pagination and report a page 2 product detail page.",
+        "domain": "books.toscrape.com",
+        "task_type": "catalog_pagination_product_report",
+        "body_md": "Navigate Books to Scrape Mystery pagination and report a page 2 product detail page.",
+        "input_schema": {"start_url": {"type": "string", "required": True}, "page_text": {"type": "string", "required": False}},
+        "output_schema": {"final_url": "string", "page_text": "string", "report_text": "string", "status": "string"},
+        "arguments": [
+            {
+                "name": "start_url",
+                "description": "Books to Scrape home URL.",
+                "type": "string",
+                "required": True,
+                "default_value": None,
+                "validation": {},
+                "examples": ["https://books.toscrape.com/"],
+                "is_dynamic": True,
+                "order_index": 0,
+            }
+        ],
+        "steps": [
+            {
+                "name": "open_books_home",
+                "description": "Open Books to Scrape.",
+                "step_type": "goto",
+                "handler_ref": None,
+                "action": {"url_template": "{{start_url}}"},
+                "argument_bindings": {},
+                "assertions": {"url_contains": "books.toscrape.com"},
+                "fallback_policy": {"retry": 0},
+                "update_policy": {"record_update_event": True},
+            },
+            {
+                "name": "open_mystery_category",
+                "description": "Open the Mystery category.",
+                "step_type": "click",
+                "handler_ref": None,
+                "action": {"selector": "a[href=\"catalogue/category/books/mystery_3/index.html\"]", "settle_ms": 1000},
+                "argument_bindings": {},
+                "assertions": {"contains_any": []},
+                "fallback_policy": {"retry": 0},
+                "update_policy": {"record_update_event": True},
+            },
+            {
+                "name": "wait_mystery_page_two",
+                "description": "Wait for Mystery page 2.",
+                "step_type": "wait_for_text",
+                "handler_ref": None,
+                "action": {"source": "page_text"},
+                "argument_bindings": {},
+                "assertions": {"contains_any": ["Page 2 of 2", "Mystery"]},
+                "fallback_policy": {"retry": 0},
+                "update_policy": {"record_update_event": True},
+            },
+            {
+                "name": "open_first_page_two_book",
+                "description": "Open the first book on page 2.",
+                "step_type": "click",
+                "handler_ref": None,
+                "action": {"selector": "article.product_pod h3 a", "nth": 0, "settle_ms": 1000},
+                "argument_bindings": {},
+                "assertions": {"contains_any": []},
+                "fallback_policy": {"retry": 0},
+                "update_policy": {"record_update_event": True},
+            },
+            {
+                "name": "wait_product_detail",
+                "description": "Wait for product detail data.",
+                "step_type": "wait_for_text",
+                "handler_ref": None,
+                "action": {"source": "page_text"},
+                "argument_bindings": {},
+                "assertions": {"contains_any": ["Product Information", "Availability", "Price"]},
+                "fallback_policy": {"retry": 0},
+                "update_policy": {"record_update_event": True},
+            },
+            {
+                "name": "render_report",
+                "description": "Render the product report.",
+                "step_type": "render_report",
+                "handler_ref": None,
+                "action": {"template_resource": "report_markdown"},
+                "argument_bindings": {},
+                "assertions": {"required_output": ["report_text", "page_text"]},
+                "fallback_policy": {"retry": 0},
+                "update_policy": {"record_update_event": True},
+            },
+        ],
+        "resources": [
+            {
+                "resource_type": "report_template",
+                "name": "report_markdown",
+                "description": "Markdown report template.",
+                "content_json": None,
+                "content_text": "# Books Mystery Page 2 Product Report\n\nFinal URL: {{final_url}}\n\n{{page_text}}\n",
+                "load_when": {"step": "render_report"},
+            }
+        ],
+        "handlers": [],
+    }
+
+
+def dynamic_controls_workflow_json() -> dict:
+    workflow = generic_flight_workflow_json()
+    workflow.update(
+        {
+            "skill_name": "verified_dynamic_controls_remove_add_report",
+            "slug": "verified-dynamic-controls-remove-add-report",
+            "description": "Remove and restore the Dynamic Controls checkbox, then report the restored state.",
+            "domain": "the-internet.herokuapp.com",
+            "task_type": "async_ui_report",
+            "body_md": "Remove and restore the Dynamic Controls checkbox, then report the restored state.",
+            "input_schema": {"start_url": {"type": "string", "required": True}, "page_text": {"type": "string", "required": False}},
+            "output_schema": {"final_url": "string", "page_text": "string", "report_text": "string", "status": "string"},
+            "arguments": [
+                {
+                    "name": "start_url",
+                    "description": "Dynamic Controls URL.",
+                    "type": "string",
+                    "required": True,
+                    "default_value": None,
+                    "validation": {},
+                    "examples": ["https://the-internet.herokuapp.com/dynamic_controls"],
+                    "is_dynamic": True,
+                    "order_index": 0,
+                }
+            ],
+            "steps": [
+                {
+                    "name": "open_dynamic_controls",
+                    "description": "Open Dynamic Controls.",
+                    "step_type": "goto",
+                    "handler_ref": None,
+                    "action": {"url_template": "{{start_url}}"},
+                    "argument_bindings": {},
+                    "assertions": {"url_contains": "dynamic_controls"},
+                    "fallback_policy": {"retry": 0},
+                    "update_policy": {"record_update_event": True},
+                },
+                {
+                    "name": "remove_checkbox",
+                    "description": "Remove the checkbox.",
+                    "step_type": "click",
+                    "handler_ref": None,
+                    "action": {"selector": "#checkbox-example button", "settle_ms": 5200},
+                    "argument_bindings": {},
+                    "assertions": {"contains_any": []},
+                    "fallback_policy": {"retry": 0},
+                    "update_policy": {"record_update_event": True},
+                },
+                {
+                    "name": "wait_checkbox_gone",
+                    "description": "Wait until the checkbox is gone.",
+                    "step_type": "wait_for_text",
+                    "handler_ref": None,
+                    "action": {"source": "page_text"},
+                    "argument_bindings": {},
+                    "assertions": {"contains_any": ["It's gone!"]},
+                    "fallback_policy": {"retry": 0},
+                    "update_policy": {"record_update_event": True},
+                },
+                {
+                    "name": "add_checkbox_back",
+                    "description": "Add the checkbox back.",
+                    "step_type": "click",
+                    "handler_ref": None,
+                    "action": {"selector": "#checkbox-example button", "settle_ms": 5200},
+                    "argument_bindings": {},
+                    "assertions": {"contains_any": []},
+                    "fallback_policy": {"retry": 0},
+                    "update_policy": {"record_update_event": True},
+                },
+                {
+                    "name": "wait_checkbox_back",
+                    "description": "Wait until the checkbox is back.",
+                    "step_type": "wait_for_text",
+                    "handler_ref": None,
+                    "action": {"source": "page_text"},
+                    "argument_bindings": {},
+                    "assertions": {"contains_any": ["It's back!"]},
+                    "fallback_policy": {"retry": 0},
+                    "update_policy": {"record_update_event": True},
+                },
+                {
+                    "name": "render_report",
+                    "description": "Render the Dynamic Controls report.",
+                    "step_type": "render_report",
+                    "handler_ref": None,
+                    "action": {"template_resource": "report_markdown"},
+                    "argument_bindings": {},
+                    "assertions": {"required_output": ["report_text", "page_text"]},
+                    "fallback_policy": {"retry": 0},
+                    "update_policy": {"record_update_event": True},
+                },
+            ],
+            "resources": [
+                {
+                    "resource_type": "report_template",
+                    "name": "report_markdown",
+                    "description": "Markdown report template.",
+                    "content_json": None,
+                    "content_text": "# Dynamic Controls Report\n\nFinal URL: {{final_url}}\n\n{{page_text}}\n",
+                    "load_when": {"step": "render_report"},
+                }
+            ],
+            "handlers": [],
+        }
+    )
+    return workflow
+
+
+def dynamic_ad_workflow_json() -> dict:
+    workflow = dynamic_controls_workflow_json()
+    workflow.update(
+        {
+            "skill_name": "dynamic_ad_review_report",
+            "slug": "dynamic-ad-review-report",
+            "description": "Dismiss a variable sponsored placement, complete a launch review form, and render a short report.",
+            "domain": "localhost",
+            "task_type": "dynamic_browser_action_demo",
+            "body_md": "Demo workflow for scriptless runtime LLM browser actions.",
+            "output_schema": {"page_text": "string", "report_text": "string", "status": "string"},
+            "steps": [
+                {
+                    "name": "open_dynamic_ad_demo",
+                    "description": "Open the dynamic ad demo.",
+                    "step_type": "goto",
+                    "handler_ref": None,
+                    "action": {"url_template": "{{start_url}}"},
+                    "argument_bindings": {},
+                    "assertions": {"url_contains": "127.0.0.1"},
+                    "fallback_policy": {"retry": 0},
+                    "update_policy": {"record_update_event": True},
+                },
+                {
+                    "name": "dismiss_variable_ad",
+                    "description": "Dismiss the variable sponsored placement.",
+                    "step_type": "llm_browser_action",
+                    "handler_ref": None,
+                    "action": {
+                        "instruction": "Close or dismiss the currently visible sponsored popup, promotional banner, or ad panel without leaving the page.",
+                        "success_criteria": [
+                            "The page status text says Ad dismissed.",
+                            "No sponsored popup, promotional banner, or ad panel remains visible.",
+                        ],
+                        "allowed_operations": ["click"],
+                        "timeout_ms": 15000,
+                    },
+                    "argument_bindings": {},
+                    "assertions": {"contains_any": []},
+                    "fallback_policy": {"retry": 0},
+                    "update_policy": {"record_update_event": True},
+                },
+                {
+                    "name": "wait_launch_review_complete",
+                    "description": "Wait for the completed review state.",
+                    "step_type": "wait_for_text",
+                    "handler_ref": None,
+                    "action": {"source": "page_text"},
+                    "argument_bindings": {},
+                    "assertions": {"contains_any": ["Launch review complete for Mina"]},
+                    "fallback_policy": {"retry": 0},
+                    "update_policy": {"record_update_event": True},
+                },
+                {
+                    "name": "render_ad_report",
+                    "description": "Render the dynamic ad report.",
+                    "step_type": "render_report",
+                    "handler_ref": None,
+                    "action": {"template_resource": "dynamic_ad_report_markdown"},
+                    "argument_bindings": {},
+                    "assertions": {"required_output": ["report_text", "page_text"]},
+                    "fallback_policy": {"retry": 0},
+                    "update_policy": {"record_update_event": True},
+                },
+            ],
+            "resources": [
+                {
+                    "resource_type": "report_template",
+                    "name": "dynamic_ad_report_markdown",
+                    "description": "Markdown report for the dynamic ad demo.",
+                    "content_json": None,
+                    "content_text": "# Dynamic Ad Review Report\n\nObserved text:\n\n{{page_text}}\n",
+                    "load_when": {"step": "render_ad_report"},
+                }
+            ],
+            "handlers": [],
+        }
+    )
+    return workflow
+
+
 class StaticCreateTraceCollector:
     provider = "static_create_trace"
 
@@ -277,29 +650,6 @@ class WorkflowCreationRuntimeServiceTest(unittest.TestCase):
 
         self.assertEqual(first_ids, second_ids)
 
-    def test_codex_synthesis_backend_does_not_send_dynamic_workflow_schema_as_response_schema(self) -> None:
-        calls = []
-
-        def fake_run(command, **kwargs):
-            calls.append({"command": command, "kwargs": kwargs})
-            return subprocess.CompletedProcess(
-                command,
-                0,
-                stdout=json.dumps(generic_flight_workflow_json(), ensure_ascii=False),
-                stderr="",
-            )
-
-        backend = CodexCliSynthesisBackend(run_command=fake_run)
-        workflow = backend.synthesize(
-            prompt="Return a workflow JSON.",
-            schema={"type": "object", "additionalProperties": {"type": "string"}},
-            model="gpt-5.5",
-        )
-
-        self.assertEqual("flight_search_report", workflow["skill_name"])
-        self.assertNotIn("--output-schema", calls[0]["command"])
-        self.assertIn("Return only JSON", calls[0]["command"][-1])
-
     def test_create_workflow_updates_page_analysis_and_reuses_knowledge_for_three_url_examples(self) -> None:
         examples = [
             (
@@ -360,6 +710,266 @@ class WorkflowCreationRuntimeServiceTest(unittest.TestCase):
         self.assertIn("Prefer role selectors", backend.prompts[2])
         self.assertIn("actionable_tips", knowledge_entries[0].content)
         self.assertGreaterEqual(len(knowledge_entries[0].content["actionable_tips"]), 2)
+
+    def test_create_workflow_records_verified_books_memory_from_run_evidence(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = Path(tmp) / "workflow_tools.sqlite"
+            output_dir = Path(tmp) / "runs"
+            store = WorkflowSkillStore(db_path)
+            store.initialize()
+            eval_loop = QueueEvalLoop(
+                [
+                    WorkflowEvaluationReport(
+                        status="passed",
+                        page_text=BOOKS_PRODUCT_TEXT,
+                        step_evaluations=[
+                            StepEvaluation(
+                                step_name="wait_mystery_page_two",
+                                step_type="wait_for_text",
+                                status="passed",
+                                summary="Mystery page 2 is visible.",
+                            ),
+                            StepEvaluation(
+                                step_name="wait_product_detail",
+                                step_type="wait_for_text",
+                                status="passed",
+                                summary="Product detail page exposes Product Information and Availability.",
+                            ),
+                        ],
+                        final_evaluation=StepEvaluation(
+                            step_name="final",
+                            step_type="final",
+                            status="passed",
+                            summary="Product title, price, availability, and product information are visible.",
+                        ),
+                    )
+                ]
+            )
+
+            payload = WorkflowCreationRuntime(
+                store,
+                output_dir=output_dir,
+                trace_collector=StaticCreateTraceCollector(page_text=BOOKS_HOME_TEXT),
+                synthesizer=LLMWorkflowSynthesizer(
+                    backend=FakeSynthesisBackend(response=books_mystery_workflow_json())
+                ),
+                evaluation_loop=eval_loop,
+            ).create(
+                start_url="https://books.toscrape.com/?ref=qa",
+                user_task="Open Books to Scrape Mystery page 2 and report the first product detail.",
+                final_state="A Mystery product detail page shows title, price, availability, and product information.",
+                arguments={"start_url": "https://books.toscrape.com/?ref=qa"},
+            )
+
+            page = PageAnalysisStore(store).lookup("https://books.toscrape.com/?ref=other")
+            knowledge = WorkflowKnowledgeStore(store).recent(category="script_generation", limit=1)[0]
+
+        self.assertEqual("succeeded", payload["status"])
+        self.assertIsNotNone(page)
+        self.assertIn("Product Information", page.analysis["stable_markers"])
+        self.assertIn("Page 2 of 2", page.analysis["wait_markers"])
+        self.assertIn("article.product_pod h3 a", json.dumps(page.analysis["verified_selectors"], ensure_ascii=False))
+        self.assertIn("wait_product_detail", page.analysis["verified_workflow_shape"])
+        self.assertIn("Product Information", knowledge.content["wait_markers"])
+        self.assertIn("article.product_pod h3 a", json.dumps(knowledge.content["verified_selectors"], ensure_ascii=False))
+        self.assertEqual("https://books.toscrape.com/", knowledge.content["url_shape"])
+        self.assertTrue(
+            any("verified selector" in tip.lower() for tip in knowledge.content["actionable_tips"]),
+            knowledge.content["actionable_tips"],
+        )
+
+    def test_create_workflow_records_async_dynamic_controls_memory_from_run_evidence(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = Path(tmp) / "workflow_tools.sqlite"
+            output_dir = Path(tmp) / "runs"
+            store = WorkflowSkillStore(db_path)
+            store.initialize()
+            eval_loop = QueueEvalLoop(
+                [
+                    WorkflowEvaluationReport(
+                        status="passed",
+                        page_text=DYNAMIC_CONTROLS_FINAL_TEXT,
+                        step_evaluations=[
+                            StepEvaluation(
+                                step_name="wait_checkbox_gone",
+                                step_type="wait_for_text",
+                                status="passed",
+                                summary="The page shows It's gone! after removal.",
+                            ),
+                            StepEvaluation(
+                                step_name="wait_checkbox_back",
+                                step_type="wait_for_text",
+                                status="passed",
+                                summary="The page shows It's back! after restoring the checkbox.",
+                            ),
+                        ],
+                    )
+                ]
+            )
+
+            WorkflowCreationRuntime(
+                store,
+                output_dir=output_dir,
+                trace_collector=StaticCreateTraceCollector(page_text=DYNAMIC_CONTROLS_TEXT),
+                synthesizer=LLMWorkflowSynthesizer(
+                    backend=FakeSynthesisBackend(response=dynamic_controls_workflow_json())
+                ),
+                evaluation_loop=eval_loop,
+            ).create(
+                start_url="https://the-internet.herokuapp.com/dynamic_controls?utm=qa",
+                user_task="Remove the checkbox, wait until it is gone, add it back, and report the restored state.",
+                final_state="The page says It's back! and the checkbox section is visible again.",
+                arguments={"start_url": "https://the-internet.herokuapp.com/dynamic_controls?utm=qa"},
+            )
+
+            page = PageAnalysisStore(store).lookup("https://the-internet.herokuapp.com/dynamic_controls?utm=other")
+            knowledge = WorkflowKnowledgeStore(store).recent(category="script_generation", limit=1)[0]
+
+        self.assertIsNotNone(page)
+        self.assertIn("It's back!", page.analysis["stable_markers"])
+        self.assertIn("It's gone!", page.analysis["wait_markers"])
+        self.assertIn("#checkbox-example button", json.dumps(page.analysis["verified_selectors"], ensure_ascii=False))
+        self.assertTrue(any("async" in note.lower() for note in page.analysis["risk_notes"]), page.analysis["risk_notes"])
+        self.assertIn("#checkbox-example button", json.dumps(knowledge.content["verified_selectors"], ensure_ascii=False))
+        self.assertTrue(
+            any("asynchronous" in tip.lower() or "async" in tip.lower() for tip in knowledge.content["actionable_tips"]),
+            knowledge.content["actionable_tips"],
+        )
+
+    def test_create_workflow_records_scriptless_dynamic_action_memory_from_eval_evidence(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = Path(tmp) / "workflow_tools.sqlite"
+            output_dir = Path(tmp) / "runs"
+            store = WorkflowSkillStore(db_path)
+            store.initialize()
+            eval_loop = QueueEvalLoop(
+                [
+                    WorkflowEvaluationReport(
+                        status="passed",
+                        page_text=DYNAMIC_AD_FINAL_TEXT,
+                        step_evaluations=[
+                            StepEvaluation(
+                                step_name="dismiss_variable_ad",
+                                step_type="llm_browser_action",
+                                status="passed",
+                                summary="The sponsored placement was dismissed without leaving the page.",
+                                evidence={
+                                    "page_context": {"candidate_count": 7},
+                                    "result": {"clicked": True, "matched_text": "No thanks"},
+                                },
+                            ),
+                            StepEvaluation(
+                                step_name="wait_launch_review_complete",
+                                step_type="wait_for_text",
+                                status="passed",
+                                summary="The final launch review marker is visible.",
+                            ),
+                        ],
+                    )
+                ]
+            )
+
+            WorkflowCreationRuntime(
+                store,
+                output_dir=output_dir,
+                trace_collector=StaticCreateTraceCollector(page_text=DYNAMIC_AD_TEXT),
+                synthesizer=LLMWorkflowSynthesizer(backend=FakeSynthesisBackend(response=dynamic_ad_workflow_json())),
+                evaluation_loop=eval_loop,
+            ).create(
+                start_url="http://127.0.0.1:8765/index.html?variant=banner",
+                user_task="Dismiss the variable sponsored ad, complete launch review for Mina, and report the completed state.",
+                final_state="The page says Launch review complete for Mina and no ad panel remains visible.",
+                arguments={"start_url": "http://127.0.0.1:8765/index.html?variant=banner"},
+            )
+
+            page = PageAnalysisStore(store).lookup("http://127.0.0.1:8765/index.html?variant=rail")
+            knowledge = WorkflowKnowledgeStore(store).recent(category="script_generation", limit=1)[0]
+
+        self.assertIsNotNone(page)
+        self.assertIn("Launch review complete for Mina", page.analysis["wait_markers"])
+        self.assertIn("dismiss_variable_ad", json.dumps(page.analysis["dynamic_action_hints"], ensure_ascii=False))
+        self.assertTrue(any("scriptless" in note.lower() for note in page.analysis["risk_notes"]), page.analysis["risk_notes"])
+        self.assertIn("llm_browser_action", page.analysis["verified_workflow_shape"])
+        self.assertIn("dynamic_action_hints", knowledge.content)
+        self.assertTrue(
+            any("llm_browser_action" in tip for tip in knowledge.content["actionable_tips"]),
+            knowledge.content["actionable_tips"],
+        )
+
+    def test_create_workflow_prompt_includes_human_step_guide(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = Path(tmp) / "workflow_tools.sqlite"
+            output_dir = Path(tmp) / "runs"
+            store = WorkflowSkillStore(db_path)
+            store.initialize()
+            backend = RecordingFakeSynthesisBackend(response=generic_flight_workflow_json())
+            step_guide = [
+                {"name": "open_flights", "description": "Open Google Flights.", "step_type": "goto"},
+                {
+                    "name": "set_route",
+                    "description": "Set SEA as origin and JFK as destination.",
+                    "step_type": "fill",
+                },
+                {
+                    "name": "wait_flight_results",
+                    "description": "Wait for visible SEA to JFK flight results.",
+                    "step_type": "wait_for_text",
+                },
+            ]
+
+            WorkflowCreationRuntime(
+                store,
+                output_dir=output_dir,
+                trace_collector=StaticCreateTraceCollector(page_text=FLIGHT_TEXT),
+                synthesizer=LLMWorkflowSynthesizer(backend=backend),
+            ).create(
+                start_url="https://www.google.com/flights",
+                user_task="Search for flights from SEA to JFK.",
+                final_state="SEA to JFK flight results are visible.",
+                arguments={"start_url": "https://www.google.com/flights", "step_guide": step_guide},
+            )
+
+            with sqlite3.connect(db_path) as conn:
+                conn.row_factory = sqlite3.Row
+                session = conn.execute("select input_json from workflow_creation_sessions").fetchone()
+
+        self.assertEqual(1, len(backend.prompts))
+        self.assertIn("Human-authored step guide JSON", backend.prompts[0])
+        self.assertIn("open_flights", backend.prompts[0])
+        self.assertIn("set_route", backend.prompts[0])
+        self.assertIn("preserve the guide order", backend.prompts[0])
+        self.assertIn("step_guide", json.loads(session["input_json"]))
+
+    def test_intelligent_cold_init_enriches_trace_with_page_memory_before_synthesis(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = Path(tmp) / "workflow_tools.sqlite"
+            output_dir = Path(tmp) / "runs"
+            store = WorkflowSkillStore(db_path)
+            store.initialize()
+            WorkflowKnowledgeStore(store).append(
+                category="script_generation",
+                summary="Google Flights waits should prefer visible result markers",
+                content={"actionable_tips": ["Wait for Best departing flights before report rendering."]},
+                source="test",
+                confidence=0.8,
+                tags=["flights"],
+            )
+            backend = RecordingFakeSynthesisBackend(response=generic_flight_workflow_json())
+
+            payload = IntelligentColdInitRunner(
+                store,
+                output_dir=output_dir,
+                trace_collector=StaticTraceCollector(page_text=FLIGHT_TEXT),
+                synthesizer=LLMWorkflowSynthesizer(backend=backend),
+            ).run(
+                user_request="Create a Google Flights report workflow.",
+                arguments={"start_url": "https://www.google.com/flights"},
+            )
+
+        self.assertEqual("flight_search_report", payload.skill.name)
+        self.assertEqual(1, len(backend.prompts))
+        self.assertIn("google-com-flights", backend.prompts[0])
+        self.assertIn("Google Flights waits should prefer visible result markers", backend.prompts[0])
 
     def test_naver_map_route_task_uses_start_and_end_station_arguments(self) -> None:
         from webworkflows.cold_init_types import ArtifactTrace
@@ -802,12 +1412,72 @@ class WorkflowCreationRuntimeServiceTest(unittest.TestCase):
             self.assertEqual(1, payload["workflow_version"])
             self.assertEqual("static_create_trace", payload["discovery_provider"])
 
+    def test_cli_create_workflow_codex_synthesizer_uses_app_server_backend(self) -> None:
+        from webworkflows import cli
+
+        class FakeCodexAppServerSynthesisBackend:
+            provider = "codex_app_server"
+
+            def synthesize(self, *, prompt, schema, model):
+                self.prompt = prompt
+                self.schema = schema
+                self.model = model
+                return naver_stock_workflow_json()
+
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = Path(tmp) / "workflow_tools.sqlite"
+            output_dir = Path(tmp) / "runs"
+            page_text_path = Path(tmp) / "page.txt"
+            page_text_path.write_text(TRACE_TEXT, encoding="utf-8")
+            fake_backend = FakeCodexAppServerSynthesisBackend()
+            args = argparse.Namespace(
+                db=str(db_path),
+                output_dir=str(output_dir),
+                start_url="https://search.naver.com/search.naver?query=삼성전자%20주가",
+                task="네이버에서 삼성전자 주가 리포트",
+                final_state="삼성전자 증권정보 카드와 현재가가 보여야 한다.",
+                company_name="삼성전자",
+                ticker="005930",
+                news_limit=None,
+                argument=[],
+                step_guide_json=None,
+                page_text_file=str(page_text_path),
+                discovery_provider="static",
+                synthesizer="codex",
+                workflow_json_file=None,
+                synthesizer_model="gpt-test",
+                max_attempts=1,
+                repair_synthesizer="fake-copy",
+                headed=False,
+                eval_and_evolve=False,
+            )
+
+            with (
+                patch("webworkflows.cli.CodexAppServerSynthesisBackend", return_value=fake_backend, create=True)
+                as backend_factory,
+                contextlib.redirect_stdout(io.StringIO()),
+            ):
+                cli.create_workflow(args)
+
+            backend_factory.assert_called_once()
+            self.assertEqual("gpt-test", fake_backend.model)
+
+            with sqlite3.connect(db_path) as conn:
+                conn.row_factory = sqlite3.Row
+                attempt = conn.execute("select * from workflow_creation_attempts").fetchone()
+
+            self.assertEqual("llm_codex_app_server", attempt["synthesis_provider"])
+
     def test_cli_create_workflow_does_not_inject_stock_arguments_by_default(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             db_path = Path(tmp) / "workflow_tools.sqlite"
             output_dir = Path(tmp) / "runs"
             page_text_path = Path(tmp) / "page.txt"
             workflow_path = Path(tmp) / "flight_workflow.json"
+            step_guide = [
+                {"name": "open_flights", "description": "Open Google Flights.", "step_type": "goto"},
+                {"name": "wait_results", "description": "Wait for SEA to JFK results.", "step_type": "wait_for_text"},
+            ]
             page_text_path.write_text(FLIGHT_TEXT, encoding="utf-8")
             workflow_path.write_text(json.dumps(generic_flight_workflow_json(), ensure_ascii=False), encoding="utf-8")
 
@@ -835,6 +1505,8 @@ class WorkflowCreationRuntimeServiceTest(unittest.TestCase):
                     "agent-json",
                     "--workflow-json-file",
                     str(workflow_path),
+                    "--step-guide-json",
+                    json.dumps(step_guide),
                 ],
                 cwd=Path(__file__).resolve().parents[1],
                 text=True,
@@ -849,7 +1521,9 @@ class WorkflowCreationRuntimeServiceTest(unittest.TestCase):
                 conn.row_factory = sqlite3.Row
                 session = conn.execute("select * from workflow_creation_sessions").fetchone()
 
-            self.assertNotIn("news_limit", json.loads(session["input_json"]))
+            session_input = json.loads(session["input_json"])
+            self.assertNotIn("news_limit", session_input)
+            self.assertEqual(step_guide, session_input["step_guide"])
 
 
 if __name__ == "__main__":

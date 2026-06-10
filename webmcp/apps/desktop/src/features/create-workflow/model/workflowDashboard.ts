@@ -3,9 +3,10 @@ import type {
   WorkflowArgument,
   WorkflowExample,
   WorkflowRun,
+  WorkflowStepGuideItem,
   WorkflowStep,
   WorkflowUpdateProposal
-} from "./vite-env";
+} from "../../../vite-env";
 
 export type StepCard = {
   id: number;
@@ -39,6 +40,13 @@ export type CreateWorkflowForm = {
   finalState: string;
   headed: boolean;
   synthesizerModel: string;
+  stepGuide?: CreateWorkflowStepGuideItem[];
+};
+
+export type CreateWorkflowStepGuideItem = {
+  name: string;
+  description: string;
+  stepType: string;
 };
 
 export type OperationControlState = {
@@ -156,6 +164,7 @@ export function canCreateWorkflow(form: Pick<CreateWorkflowForm, "startUrl" | "t
 }
 
 export function buildCreateWorkflowPayload(form: CreateWorkflowForm): CreateWorkflowPayload {
+  const stepGuide = normalizeCreateWorkflowStepGuide(form.stepGuide);
   const payload: CreateWorkflowPayload = {
     dbPath: form.dbPath,
     repoRoot: form.repoRoot,
@@ -169,7 +178,33 @@ export function buildCreateWorkflowPayload(form: CreateWorkflowForm): CreateWork
     synthesizerModel: form.synthesizerModel,
     evalBrowser: "chromium"
   };
+  if (stepGuide.length > 0) {
+    payload.stepGuide = stepGuide;
+  }
   return payload;
+}
+
+export function normalizeCreateWorkflowStepGuide(
+  stepGuide: CreateWorkflowStepGuideItem[] | undefined
+): WorkflowStepGuideItem[] {
+  if (!Array.isArray(stepGuide)) {
+    return [];
+  }
+  const normalized: WorkflowStepGuideItem[] = [];
+  stepGuide.forEach((item, index) => {
+    const name = item.name.trim();
+    const description = item.description.trim();
+    const stepType = item.stepType.trim();
+    if (!name && !description) {
+      return;
+    }
+    normalized.push({
+      name: name || `step_${index + 1}`,
+      description,
+      step_type: stepType || "click"
+    });
+  });
+  return normalized;
 }
 
 export function buildOperationControlState(input: { running: boolean; paused: boolean }): OperationControlState {
