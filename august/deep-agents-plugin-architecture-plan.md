@@ -73,6 +73,19 @@ Plugin마다 기능과 입력 schema가 완전히 다른 경우에는 `plugin_se
 
 따라서 Agent Factory는 정상 요청마다 실행하는 생성기가 아니라, profile cache miss 또는 설정 변경 시에만 실행하는 builder로 정의한다.
 
+### 1.5 Production Runtime Invariants
+
+다음 규칙은 선택사항이 아니라 production 기본 계약으로 둔다.
+
+1. 고정 Base Graph와 stable dispatch surface를 기본 경로로 사용한다.
+2. 실행 중인 thread에서 Tool 목록이나 Tool schema를 변경하지 않는다.
+3. Typed Plugin Tool은 profile 또는 thread 생성 시점에만 추가할 수 있다.
+4. `plugin_dispatch`는 모델의 요청을 신뢰하지 않고 서버에서 plugin, version, operation, schema, tenant, scope, approval state를 모두 재검증한다.
+5. thread resume는 현재 Registry를 다시 resolve하지 않고 최초의 immutable capability snapshot을 사용한다.
+6. Plugin runtime에 도달한 요청은 side effect 여부가 불명확하면 legacy 경로로 자동 재실행하지 않는다.
+7. graph/tool-definition cache, runtime context, Plugin connection/session state를 서로 분리한다.
+8. Registry와 policy를 조회할 수 없을 때 새 Plugin 실행은 fail-closed하고, 검증된 기존 snapshot을 가진 resume만 허용한다.
+
 ## 2. 목표 아키텍처
 
 ```text
@@ -98,23 +111,53 @@ LangGraph run 및 checkpoint
 Tool 실행 시 정책 재검증 / 감사 로그
 ```
 
-각 LangGraph thread는 시작 시점의 Plugin version snapshot을 사용한다. 실행 도중 Plugin 설정이 변경되어도 진행 중인 thread는 기존 버전을 유지한다.
+각 LangGraph thread는 시작 시점에 immutable capability snapshot을 생성하고 `capability_snapshots` row에 저장한다. 실행 도중 Plugin 설정이 변경되어도 진행 중인 thread는 기존 snapshot을 사용한다.
 
 ```python
 plugin_snapshot = {
-    "browser": "1.0.0",
-    "notion": "1.2.0",
-    "gmail": "2.1.0",
+    "snapshot_id": "cap_20260815_abc123",
+    "plugins": {
+        "browser": "1.0.0",
+        "notion": "1.2.0",
+        "gmail": "2.1.0",
+    },
+    "manifest_digests": {
+        "notion": "sha256:...",
+    },
+    "tool_schema_hashes": {
+        "notion__search": "sha256:...",
+    },
+    "policy_version": "policy-3",
+    "runtime_contract_version": "plugin-runtime-v1",
+    "graph_schema_version": "agent-graph-v4",
+    "non_secret_config_hash": "sha256:...",
 }
 ```
 
-checkpoint에는 다음 정보를 저장한다.
+checkpoint에는 snapshot id와 다음 정보를 저장한다.
 
 - tenant/user 식별자
+- thread/run 식별자
+- immutable `snapshot_id`
 - 활성 Plugin id와 version
-- capability hash
-- 권한 정책 버전
+- manifest/artifact digest
+- Tool schema hash
+- 권한 및 approval 정책 버전
+- graph/runtime contract 버전
 - browser session id
+
+Resume 시 현재 Registry를 다시 조회하지 않는다. snapshot이 revoke되었거나 runtime contract가 호환되지 않으면 silent fallback하지 않고 명시적으로 blocked 상태로 전환해 재승인 또는 migration을 요구한다.
+
+Resume compatibility 규칙:
+
+| 상황 | 새 run | 기존 snapshot resume |
+|---|---|---|
+| 새 Plugin version publish | 새 version 선택 가능 | 기존 version 유지 |
+| 기존 version revoke | 실행 불가 | drain 후 blocked 또는 명시적 migration |
+| policy가 stricter해짐 | 새 policy 사용 | 재승인 또는 blocked |
+| runtime contract incompatible | 새 호환 version 필요 | 자동 resume 금지 |
+| graph schema incompatible | 새 graph 사용 | migration checkpoint 필요 |
+| endpoint/artifact digest 변경 | 검증 전 실행 금지 | 원래 digest 복구 또는 blocked |
 
 API key, OAuth refresh token 같은 secret은 checkpoint나 LLM context에 저장하지 않는다.
 
@@ -221,28 +264,69 @@ user_plugins
 - created_at
 - updated_at
 
+capability_snapshots
+- id
+- tenant_id
+- user_id
+- thread_id
+- snapshot_hash
+- manifest_digests_jsonb
+- tool_schema_hashes_jsonb
+- policy_version
+- runtime_contract_version
+- graph_schema_version
+- non_secret_config_hash
+- status
+- created_at
+
 plugin_permissions
-- plugin_id
+- plugin_version_id
 - tool_name
 - scope
 - risk_level
 - approval_required
+- policy_version
 
 plugin_runs
 - run_id
 - thread_id
 - tenant_id
 - user_id
+- snapshot_id
 - plugin_id
 - plugin_version
 - tool_name
 - status
+- attempt
+- idempotency_key
+- approval_id
+- trace_id
+- latency_ms
+- error_class
 - redacted_input_jsonb
 - redacted_output_jsonb
+- retention_until
 - created_at
 ```
 
 `manifest_jsonb`와 `config_jsonb`는 확장성을 위해 사용한다. 사용자 권한, version pin, Tool allowlist처럼 조회 빈도가 높은 필드는 JSONB 안에만 숨기지 않는다.
+
+### 4.3 Database invariants
+
+Migration에는 다음 제약조건과 운영 규칙을 포함한다.
+
+- 모든 테이블에 명시적인 primary key와 foreign key를 둔다.
+- `(plugin_id, version)`은 unique이며 publish 이후 version row를 수정하지 않는다.
+- `plugin_permissions`는 `plugin_version_id`에 연결해 pinned thread의 정책이 바뀌지 않게 한다.
+- `capability_snapshots`는 immutable insert-only record로 운영하고 삭제 대신 status를 변경한다.
+- 모든 resolver query는 `tenant_id`를 포함하고, 가능한 환경에서는 PostgreSQL RLS를 적용한다.
+- `user_plugins`, `plugin_versions`, `plugin_permissions`, `capability_snapshots`에 tenant-aware composite index를 추가한다.
+- snapshot 생성은 entitlement, version, policy를 하나의 transaction에서 읽고 snapshot hash를 저장한다.
+- `config_jsonb`에는 secret 값이 아니라 secret manager reference만 저장한다.
+- `plugin_runs`는 보존 기간, partition, redaction 정책을 적용한다.
+- side-effect Tool은 `idempotency_key`와 attempt를 저장하고 중복 실행을 차단한다.
+
+Resolver가 Registry에 접근할 수 없는 경우 새 Plugin을 fail-closed한다. 이미 검증된 snapshot을 가진 resume은 snapshot artifact와 policy를 다시 검증할 수 있을 때만 허용한다.
 
 ## 5. 내부 Resolver API
 
@@ -251,10 +335,13 @@ Agent가 PostgreSQL을 직접 조회하지 않도록 내부 Repository와 Resolv
 ```python
 @dataclass
 class AgentCapabilities:
+    snapshot_id: str
     skills: list[SkillSource]
     tools: list[BaseTool]
     plugin_snapshot: dict[str, str]
     policy: PluginPolicy
+    runtime_contract_version: str
+    graph_schema_version: str
 
 
 async def resolve_agent_capabilities(
@@ -344,7 +431,18 @@ runtime_context = {
 }
 ```
 
-공통 기능은 고정된 Typed Tool로 제공하고, Plugin마다 schema가 다른 기능만 필요한 시점에 추가하거나 `plugin_dispatch`로 라우팅한다.
+공통 기능은 고정된 Typed Tool로 제공하고, Plugin마다 schema가 다른 기능은 `plugin_dispatch`로 라우팅한다. Dynamic Typed Tool을 사용하더라도 profile 또는 thread 생성 시점에만 추가하며, 실행 중인 thread의 Tool 목록을 변경하지 않는다.
+
+`plugin_dispatch`는 다음을 모델과 별개로 server-side에서 검증한다.
+
+```text
+allowed tenant
+snapshot_id and plugin_version
+operation and input schema
+scope and entitlement
+approval state and expiry
+endpoint and artifact digest
+```
 
 Agent profile cache를 사용하는 경우 다음 값을 cache key에 포함한다.
 
@@ -352,6 +450,8 @@ Agent profile cache를 사용하는 경우 다음 값을 cache key에 포함한�
 plugin_snapshot_hash
 model_id
 policy_version
+runtime_contract_version
+graph_schema_version
 agent_config_version
 core_tool_schema_version
 ```
@@ -360,7 +460,9 @@ core_tool_schema_version
 
 profile cache miss가 발생하면 한 요청만 profile을 생성하도록 singleflight 또는 분산 lock을 적용한다. Plugin enable, disable, publish가 발생하면 관련 profile만 invalidate하고 인기 조합은 background warm-up한다.
 
-인증 token, API key, browser page 객체, 사용자별 secret은 Agent profile cache에 포함하지 않는다.
+Profile cache key의 `plugin_snapshot_hash`에는 tenant-scoped entitlement revision, endpoint identity, non-secret config hash, policy version, Tool schema digest가 포함되어야 한다. 이 정보가 hash에 포함된다는 것을 보장할 수 없으면 tenant_id를 cache key에 추가한다.
+
+인증 token, API key, browser page 객체, 사용자별 secret, mutable runtime client는 Agent profile cache에 포함하지 않는다. Immutable graph/tool definition cache와 thread-scoped runtime connection/session state를 분리한다.
 
 ### 6.2 Plugin 구성과 Tool surface 선택
 
@@ -419,6 +521,23 @@ Raw `StateGraph`를 직접 구성할 때는 compile 이후 ToolNode의 Tool 목�
 ### 6.3 Cache, lazy loading, latency 관측
 
 Plugin을 사용하지 않는 요청에서 Plugin runtime에 연결하거나 전체 Skill을 materialize하지 않는다.
+
+Cache는 다음 세 계층으로 분리한다.
+
+```text
+graph/tool-definition cache: immutable, cross-user 재사용 가능
+runtime context: thread/user 단위, secret reference와 snapshot 포함
+Plugin connection/session: thread 또는 runtime 단위, mutable client 보관
+```
+
+Cache 운영 규칙:
+
+- manifest, Tool schema, Skill content는 immutable version/digest key로 cache한다.
+- mutable BaseTool, MCP client, credential, browser session은 graph cache에 넣지 않는다.
+- TTL, memory bound, negative cache, stale-read limit을 설정한다.
+- replica 간 invalidation은 audited event 또는 transactional notification으로 전파한다.
+- entitlement/policy cache가 stale하면 새 실행은 fail-closed한다.
+- cache stampede와 cross-tenant hit를 별도 테스트한다.
 
 ```text
 Plugin manifest:
@@ -557,6 +676,11 @@ plugin_scopes
 - Tool input/output과 Plugin version을 redacted audit log에 기록
 - Plugin runtime outbound domain과 rate limit 제한
 - version과 artifact digest pinning
+- endpoint allowlist와 SSRF 방어
+- registry/runtime 장애 시 fail-closed
+- circuit breaker, bulkhead, cancellation, payload limit 적용
+- approval replay, approval expiry, version revoke 검증
+- tenant RLS와 cache cross-tenant isolation 검증
 
 ### 위험도 예시
 
@@ -718,6 +842,16 @@ plugin_legacy_fallback
 
 기본값은 모두 off로 시작하고, flag별로 독립적으로 rollback할 수 있어야 한다.
 
+Feature flag 운영 규칙:
+
+- 적용 순서는 global → tenant → plugin → version → tool의 가장 좁은 범위를 우선한다.
+- 권한, policy, registry를 확인할 수 없으면 fail-closed한다.
+- flag 변경은 actor, reason, old/new value, effective time을 audit한다.
+- replica 간 propagation SLA와 stale flag의 최대 허용 시간을 정의한다.
+- 새 run에는 최신 flag를 적용하고, resume run은 원래 snapshot과 flag compatibility를 확인한다.
+- plugin/version/tool 단위 kill switch를 제공한다.
+- canary error budget 초과 시 자동으로 신규 Plugin 실행을 중지한다.
+
 ### 12.2 Test Plugin 정의
 
 첫 Plugin은 실제 외부 서비스가 아니라 deterministic test Plugin으로 만든다. 목적은 기능 시연이 아니라 다음 경로를 모두 검증하는 것이다.
@@ -760,6 +894,23 @@ test-plugin/
 | `test__delay` | timeout과 latency 관측 | 없음 |
 
 `test__create_record`는 production DB가 아닌 별도 `plugin_test_records` 또는 in-memory store만 사용한다. `test__fail`과 `test__delay`는 의도적으로 오류와 지연을 발생시켜 resilience를 검증한다.
+
+Test Plugin은 다음 failure/abuse fixture도 제공한다.
+
+```text
+malformed_output
+schema_drift
+unauthorized_tenant
+auth_failure
+ambiguous_timeout
+duplicate_delivery
+approval_expired
+approval_replay
+rate_limit
+payload_too_large
+```
+
+HTTP runtime과 선택적인 MCP runtime이 같은 capability contract와 오류 분류를 반환하는지 parity test를 작성한다. `test__create_record`의 side effect는 idempotency key로 중복 실행되지 않아야 한다.
 
 Test Plugin의 Skill에는 실제 외부 서비스 지식 대신 다음을 명시한다.
 
@@ -850,7 +1001,10 @@ Rollback:
 - health check, timeout, retry, idempotency key 구현
 - manifest의 Tool schema와 runtime schema 비교
 - `test__echo`, `test__create_record`, `test__fail`, `test__delay` contract test 작성
+- malformed output, schema drift, auth/RLS, duplicate delivery, ambiguous timeout, approval replay 테스트 작성
+- HTTP/MCP contract parity 검증
 - Tool namespace, version, digest 검증
+- payload limit, rate limit, cancellation, resource exhaustion 검증
 - staging tenant에만 `plugin_test_runtime=on`
 
 Exit criteria:
@@ -926,6 +1080,9 @@ Rollback:
 - Test Plugin과 기존 Skill-only 경로의 결과와 latency 비교
 - Plugin runtime down, stale version, cache miss, permission denial 상황 재현
 - 운영자가 flag를 끄고 legacy 경로로 복귀하는 rollback drill 수행
+- in-flight Plugin call drain과 quiesce 절차 검증
+- ambiguous timeout과 side-effect receipt를 수동/자동으로 분류
+- canary 자동 abort threshold와 fail-closed 조건 확정
 - dashboard와 alert 기준 확정
 
 Canary 중 비교할 지표:
@@ -951,10 +1108,14 @@ Exit criteria:
 
 Rollback:
 
-1. `plugin_tool_execution=off`
-2. `plugin_skill_source=off`
-3. `plugin_capability_snapshot=off`
-4. 마지막으로 `plugin_registry_read=off`
+1. 신규 run에 대한 `plugin_tool_execution=off`
+2. Plugin runtime을 drain하고 in-flight call 완료 또는 blocked 상태 확인
+3. ambiguous outcome은 idempotency receipt로 reconciliation
+4. `plugin_skill_source=off`
+5. `plugin_capability_snapshot=off`
+6. 마지막으로 `plugin_registry_read=off`
+
+이미 runtime에 도달한 요청은 legacy 경로로 자동 재실행하지 않는다. Resume thread는 원래 snapshot이 호환되는지 확인한 뒤 계속하거나 명시적 재승인을 요구한다.
 
 ### 12.10 Milestone M6: 실제 Read-only Skill 1개 전환
 
@@ -999,6 +1160,9 @@ Rollback:
 - Tool schema context threshold 초과 시 progressive discovery 전환
 - cache warm-up, singleflight, `list_changed` invalidation 검증
 - Plugin 간 데이터 전달과 tenant isolation 테스트
+- registry outage, plugin outage, cache stampede, long schema, concurrency load test
+- Tool selection accuracy, approval latency, DB query budget, p95/p99 비교
+- browser session concurrency, HITL resume, checkpoint compatibility 테스트
 
 Exit criteria:
 
@@ -1043,6 +1207,40 @@ Exit criteria:
 [ ] version pin과 rollback runbook 완료
 ```
 
+### 12.14 Production-readiness test matrix와 release gate
+
+Canary 전에 다음 테스트 계층을 모두 통과해야 한다.
+
+| 계층 | 필수 검증 |
+|---|---|
+| Unit | Manifest validation, resolver, policy, namespace, snapshot hash |
+| Integration | PostgreSQL migration, RLS, transaction snapshot, cache invalidation |
+| Contract | HTTP/MCP Tool schema, malformed output, timeout, error class |
+| Agent | Deep Agents 0.4.x graph, middleware ordering, runtime context propagation |
+| Migration | Mixed-version app/DB, forward/backward compatibility, rollback |
+| Security | Auth/RLS, tenant isolation, SSRF, secret reference, prompt injection boundary |
+| Reliability | Retry, idempotency, cancellation, circuit breaker, bulkhead, ambiguous outcome |
+| Browser | Session isolation, concurrent tabs, allowed domains, browser checkpoint resume |
+| HITL | Approval expiry, replay, revoke, interrupt/resume |
+| Performance | 1/5/20 Plugin cold/warm, concurrency, cache stampede, long schema |
+| Rollout | Canary flag propagation, automatic abort, drain, legacy fallback |
+
+Release gate는 측정값을 기록하는 것으로 끝내지 않고 사전에 수치로 고정한다.
+
+```text
+resolver/profile/tool p95 and p99
+first-token and total-run latency
+DB query budget per run
+manifest/schema/cache hit target
+Tool selection accuracy target
+Plugin error budget
+maximum stale-policy interval
+rollback completion target
+maximum discovery turns
+```
+
+이 값이 정해지지 않은 상태에서는 production canary를 시작하지 않는다.
+
 ## 13. 완료 조건
 
 ### 기능
@@ -1061,6 +1259,10 @@ Exit criteria:
 - Plugin Tool call을 audit할 수 있다.
 - timeout, retry, rate limit을 적용할 수 있다.
 - Plugin runtime 장애가 전체 Agent 장애로 번지지 않는다.
+- Immutable release row와 tenant-aware DB constraint가 적용된다.
+- snapshot을 재사용하는 resume compatibility matrix가 통과한다.
+- in-flight와 ambiguous side effect rollback drill이 통과한다.
+- production-readiness test matrix가 통과한다.
 
 ### 성능
 
@@ -1082,6 +1284,8 @@ Exit criteria:
 - canary tenant와 rollback flag가 운영 환경에서 검증된다.
 - 실제 read-only Skill 1개 이상이 rollback 가능한 상태로 Plugin 전환된다.
 - Plugin version pin, migration rollback, runtime rollback 절차가 문서화되어 있다.
+- revoked, unavailable, incompatible snapshot에 대한 resume 동작이 정의되어 있다.
+- plugin runtime에 도달한 요청을 legacy로 자동 재실행하지 않는 것이 검증되어 있다.
 
 ### 보안
 
@@ -1128,6 +1332,10 @@ Exit criteria:
 10. Test Plugin의 staging runtime 배포 방식
 11. canary tenant 선정 기준과 rollback owner
 12. legacy Skill fallback을 유지할 기간
+13. in-flight call drain과 ambiguous side-effect reconciliation 정책
+14. snapshot revoke/upgrade 시 resume compatibility 정책
+15. feature flag scope, precedence, propagation SLA, automatic abort 기준
+16. production-readiness release gate의 p95/p99와 error budget
 
 초기 구현 권장안은 다음과 같다.
 
