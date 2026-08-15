@@ -639,7 +639,7 @@ PostgreSQL
 
 ### Phase 3. 첫 번째 Plugin
 
-- read-only 기능을 가진 내부 Plugin 하나 선정
+- 별도 staging에서 동작하는 read-only Test Plugin을 첫 runtime으로 선정
 - HTTP runtime으로 시작
 - LangChain Tool wrapper 추가
 - Tool input/output schema 추가
@@ -689,7 +689,361 @@ PostgreSQL
 - profile cache hit율과 MCP discovery cache hit율 기준 통과
 - prompt input token 증가량과 first-token latency 기준 통과
 
-## 12. 완료 조건
+## 12. 안전한 전환을 위한 Migration Milestones
+
+Plugin 전환은 기존 Skill-only 경로를 한 번에 바꾸는 Big Bang migration으로 진행하지 않는다. 기존 경로를 보존한 상태에서 테스트 Plugin을 먼저 등록하고, shadow, canary, rollback을 거쳐 실제 Skill을 하나씩 Plugin으로 전환한다.
+
+### 12.1 전환 원칙
+
+- 기존 `get_user_skills()`와 Skill-only Agent 실행 경로는 마지막까지 유지한다.
+- 모든 새 기능은 feature flag 뒤에 둔다.
+- DB migration은 backward-compatible하게 작성한다.
+- Plugin runtime 오류와 기존 Skill loader 오류를 구분해 기록한다.
+- Plugin version은 immutable release로 고정한다.
+- side-effect 실행이 불확실한 경우 legacy 경로로 자동 재실행하지 않는다.
+- Plugin Resolver 실패처럼 실행 전 발생한 오류만 안전한 범위에서 legacy fallback을 허용한다.
+- 실제 Plugin migration은 read-only Skill부터 시작한다.
+
+권장 feature flag 예시:
+
+```text
+plugin_registry_read
+plugin_capability_snapshot
+plugin_test_runtime
+plugin_tool_execution
+plugin_skill_source
+plugin_canary_tenants
+plugin_legacy_fallback
+```
+
+기본값은 모두 off로 시작하고, flag별로 독립적으로 rollback할 수 있어야 한다.
+
+### 12.2 Test Plugin 정의
+
+첫 Plugin은 실제 외부 서비스가 아니라 deterministic test Plugin으로 만든다. 목적은 기능 시연이 아니라 다음 경로를 모두 검증하는 것이다.
+
+```text
+PostgreSQL registry
+  → manifest/version 조회
+  → Skill materialize
+  → Agent Tool 등록 또는 dispatch
+  → Plugin runtime 호출
+  → policy/audit/checkpoint
+  → 오류와 rollback
+```
+
+Test Plugin은 사내 staging 또는 local test server에 배포하고, 운영 데이터에는 접근하지 않는다.
+
+권장 구성:
+
+```text
+test-plugin/
+├── plugin.yaml
+├── skills/
+│   └── test-plugin-workflow/SKILL.md
+├── runtime/
+│   ├── http_server.py
+│   └── mcp_server.py       # MCP 검증 시 선택
+└── tests/
+    ├── test_manifest.py
+    ├── test_runtime_contract.py
+    └── test_failure_modes.py
+```
+
+최소 Tool set:
+
+| Tool | 목적 | side effect |
+|---|---|---|
+| `test__echo` | 입력과 context 검증 | 없음 |
+| `test__create_record` | Tool schema, approval, audit 검증 | staging DB 또는 ephemeral store에만 기록 |
+| `test__fail` | deterministic error와 retry 검증 | 없음 |
+| `test__delay` | timeout과 latency 관측 | 없음 |
+
+`test__create_record`는 production DB가 아닌 별도 `plugin_test_records` 또는 in-memory store만 사용한다. `test__fail`과 `test__delay`는 의도적으로 오류와 지연을 발생시켜 resilience를 검증한다.
+
+Test Plugin의 Skill에는 실제 외부 서비스 지식 대신 다음을 명시한다.
+
+- 어떤 상황에 `test__echo`를 사용하는지
+- `test__create_record`가 승인 대상임
+- `test__fail` 오류를 사용자에게 어떻게 보고하는지
+- Plugin version과 snapshot을 결과에 어떻게 기록하는지
+
+### 12.3 Server 저장 및 등록 흐름
+
+Test Plugin을 server에서 저장하고 사용하는 전체 경로를 먼저 완성한다.
+
+```text
+1. plugin_versions에 test Plugin manifest/version 등록
+2. plugin_skills로 기존 skills 또는 새 Skill bundle 연결
+3. user_plugins에서 staging tenant에만 enable
+4. runtime endpoint를 staging test server로 설정
+5. Plugin Resolver가 capability snapshot 생성
+6. Agent가 Skill과 Tool을 사용
+7. plugin_runs에 redacted audit 기록
+```
+
+DB에는 실행 코드를 저장하지 않는다.
+
+- Manifest, version, Skill reference, endpoint, digest, policy는 PostgreSQL에 저장
+- runtime 코드는 배포된 staging service 또는 trusted package로 관리
+- DB의 문자열을 Python import 경로로 사용해 임의 코드를 실행하지 않음
+- endpoint와 artifact digest를 allowlist와 대조
+
+초기 Test Plugin은 HTTP runtime으로 시작한다. 기존 API gateway와 observability를 재사용하기 쉽고, Deep Agents 0.4.x에 연결하는 경계가 단순하기 때문이다. 이후 동일한 capability contract를 사용해 MCP runtime을 추가한다.
+
+### 12.4 Milestone M0: Legacy baseline 고정
+
+목표: Plugin을 추가하지 않아도 기존 동작이 변하지 않는다는 기준을 만든다.
+
+작업:
+
+- 기존 Skill-only 실행 경로의 golden task 목록 작성
+- 동일한 사용자 입력에 대한 expected tool sequence와 결과 저장
+- Skill loader, browser session, checkpoint resume의 regression test 작성
+- Plugin이 없는 요청의 p50/p95 latency 기록
+- 기존 API response와 DB query count 기록
+- 현재 uncommitted 작업 및 배포 설정을 별도로 보관
+
+Exit criteria:
+
+- baseline test가 반복 실행에서 동일하게 통과한다.
+- Plugin 관련 flag가 모두 off일 때 기존 trace와 결과가 유지된다.
+- rollback 시 baseline 경로로 돌아가는 smoke test가 통과한다.
+
+Rollback:
+
+- 아무 변경도 하지 않고 기존 Skill-only 경로 유지
+
+### 12.5 Milestone M1: Additive Registry Migration
+
+목표: 기존 테이블과 API를 깨지 않고 Plugin metadata를 저장한다.
+
+작업:
+
+- `plugins`, `plugin_versions`, `plugin_skills`, `user_plugins` migration 추가
+- 필요한 경우 `skills`에 nullable source metadata 추가
+- 모든 신규 컬럼에 안전한 default 또는 nullable 설정 적용
+- migration 전후 `get_user_skills()` 결과 비교
+- migration rollback script 작성
+- registry read flag를 off로 둔 상태에서 배포
+
+Exit criteria:
+
+- 기존 Skill query가 동일한 결과를 반환한다.
+- migration을 적용한 뒤 legacy application이 정상 동작한다.
+- migration rollback과 재적용이 검증된다.
+- Test Plugin manifest를 staging DB에 등록할 수 있다.
+
+Rollback:
+
+- `plugin_registry_read=off`
+- 신규 테이블을 읽지 않고 기존 Skill API만 사용
+- 데이터 삭제가 필요한 rollback은 별도 승인 후 수행
+
+### 12.6 Milestone M2: Test Plugin Runtime과 Contract Test
+
+목표: Agent가 server에 등록된 Test Plugin을 안전하게 발견하고 호출한다.
+
+작업:
+
+- Test Plugin HTTP runtime 배포
+- health check, timeout, retry, idempotency key 구현
+- manifest의 Tool schema와 runtime schema 비교
+- `test__echo`, `test__create_record`, `test__fail`, `test__delay` contract test 작성
+- Tool namespace, version, digest 검증
+- staging tenant에만 `plugin_test_runtime=on`
+
+Exit criteria:
+
+- 잘못된 schema, 잘못된 version, 비허용 endpoint가 차단된다.
+- 성공, validation error, timeout, server error가 각각 구조화되어 반환된다.
+- `test__create_record`는 승인 없이 실행되지 않는다.
+- 모든 실행에 `plugin_id`, version, run_id, thread_id가 audit된다.
+
+Rollback:
+
+- `plugin_test_runtime=off`
+- Test Plugin endpoint 차단
+- 기존 Skill-only 경로는 계속 사용
+
+### 12.7 Milestone M3: Shadow Capability Resolver
+
+목표: 실제 Agent Tool surface를 바꾸지 않고 Plugin Resolver를 검증한다.
+
+작업:
+
+- 요청마다 legacy Skill resolver와 Plugin Resolver를 함께 실행
+- Plugin capability snapshot을 생성하되 Agent 실행에는 사용하지 않음
+- 두 resolver 결과의 Skill key, permission, version, cache 상태 비교
+- Resolver latency와 DB query count 측정
+- 불일치 결과를 audit 또는 debug log에만 기록
+
+Exit criteria:
+
+- 내부 사용자 요청에서 snapshot 생성 실패율이 0에 가깝고 원인이 분류된다.
+- legacy와 Plugin Skill metadata가 의도한 범위에서 일치한다.
+- Plugin Resolver cache hit와 invalidation이 검증된다.
+- 기존 사용자 응답과 first-token latency에 변화가 없다.
+
+Rollback:
+
+- `plugin_capability_snapshot=off`
+- legacy resolver만 실행
+
+### 12.8 Milestone M4: Dual Loader와 Test Plugin Agent Path
+
+목표: 기존 Skill과 Plugin Skill을 같은 Agent 실행에서 안전하게 비교한다.
+
+작업:
+
+- legacy Skill source와 Plugin Skill source를 같은 test thread에 주입하는 adapter 구현
+- 고정 Base Graph에 Test Plugin의 공통 Typed Tool 또는 `plugin_dispatch` 연결
+- Tool 실행 전 policy 검사와 실행 후 audit 비교
+- checkpoint 저장과 resume 테스트
+- plugin snapshot이 thread 단위로 고정되는지 확인
+- Agent가 사용자별 secret이나 browser page를 profile cache에 캡처하지 않는지 검사
+
+Exit criteria:
+
+- Test Plugin 사용 thread가 성공적으로 완료되고 resume된다.
+- legacy Skill-only thread의 결과가 바뀌지 않는다.
+- Plugin이 disabled이거나 권한이 없으면 Tool이 실행되지 않는다.
+- Plugin runtime 오류가 전체 Agent graph 오류로 확산되지 않는다.
+
+Rollback:
+
+- `plugin_tool_execution=off`
+- Agent는 기존 core Tool과 legacy Skill만 사용
+
+### 12.9 Milestone M5: Staging Canary와 Rollback Drill
+
+목표: 실제 서비스 흐름과 동일한 조건에서 제한된 사용자에게만 Plugin을 제공한다.
+
+작업:
+
+- 내부 staging tenant를 canary 대상으로 지정
+- `plugin_canary_tenants` allowlist 운영
+- Test Plugin과 기존 Skill-only 경로의 결과와 latency 비교
+- Plugin runtime down, stale version, cache miss, permission denial 상황 재현
+- 운영자가 flag를 끄고 legacy 경로로 복귀하는 rollback drill 수행
+- dashboard와 alert 기준 확정
+
+Canary 중 비교할 지표:
+
+```text
+legacy_success_rate
+plugin_success_rate
+capability_resolve_ms
+profile_cache_hit
+mcp_discovery_ms
+model_first_token_ms
+plugin_tool_error_rate
+approval_latency
+rollback_time
+```
+
+Exit criteria:
+
+- 내부 canary에서 정한 error budget 이내다.
+- rollback이 목표 시간 안에 완료된다.
+- 오류가 legacy, resolver, runtime, model, browser 계층으로 분류된다.
+- side-effect가 중복 실행되지 않는다.
+
+Rollback:
+
+1. `plugin_tool_execution=off`
+2. `plugin_skill_source=off`
+3. `plugin_capability_snapshot=off`
+4. 마지막으로 `plugin_registry_read=off`
+
+### 12.10 Milestone M6: 실제 Read-only Skill 1개 전환
+
+목표: 위험도가 낮은 기존 Skill 한 개를 Plugin으로 변환한다.
+
+선정 조건:
+
+- 외부 side effect가 없거나 매우 낮음
+- deterministic한 expected result를 만들 수 있음
+- 사용자 credential을 직접 다루지 않음
+- 실패 시 기존 Skill-only 경로로 쉽게 복귀 가능
+
+작업:
+
+- 기존 Skill을 Plugin Skill bundle로 포장
+- 기존 Skill key와 Plugin Skill key를 mapping
+- 기존 Skill과 Plugin Skill을 같은 golden task로 실행
+- shadow 또는 dual-run으로 결과 비교
+- 내부 canary 후 점진적으로 tenant 확대
+
+Exit criteria:
+
+- 기존 golden task의 결과와 Tool sequence가 허용 범위 내에서 일치한다.
+- Plugin version pin과 rollback이 작동한다.
+- Skill content cache와 Plugin metadata cache가 의도대로 invalidate된다.
+- 최소 한 번의 실제 rollback drill을 통과한다.
+
+Rollback:
+
+- 해당 Skill의 mapping만 legacy source로 되돌린다.
+- Plugin 전체를 disable하지 않고 영향 범위가 있는 Skill만 rollback한다.
+
+### 12.11 Milestone M7: Plugin 확대와 Long-tail 경로
+
+목표: 두 개 이상의 Plugin을 조합하고, Plugin 수 증가에 따른 성능 저하를 통제한다.
+
+작업:
+
+- 두 번째 read-only Plugin 추가
+- 공통 Typed Tool과 `plugin_dispatch`의 적용 범위 확정
+- Plugin 1개/5개/20개 조건에서 cold/warm benchmark 실행
+- Tool schema context threshold 초과 시 progressive discovery 전환
+- cache warm-up, singleflight, `list_changed` invalidation 검증
+- Plugin 간 데이터 전달과 tenant isolation 테스트
+
+Exit criteria:
+
+- Plugin 수 증가에도 정한 p95와 token budget을 만족한다.
+- 공통 기능은 Typed Tool로, long-tail 기능은 dispatch 또는 subgraph로 분리되어 있다.
+- Plugin 하나의 장애가 다른 Plugin과 legacy 경로에 전파되지 않는다.
+
+### 12.12 Milestone M8: 운영 전환과 Legacy Deprecation
+
+목표: 충분한 운영 기간과 회귀 검증 후 legacy 경로를 단계적으로 정리한다.
+
+작업:
+
+- Plugin 전환율과 legacy fallback 비율 관측
+- Plugin version publish/rollback runbook 확정
+- license/SBOM/security scan 자동화
+- legacy Skill과 Plugin Skill의 중복 데이터 정리 계획 수립
+- deprecation 기간과 owner 지정
+- legacy path 제거 전 마지막 rollback checkpoint 생성
+
+Exit criteria:
+
+- 모든 production 대상 Skill에 owner, version, rollback path가 있다.
+- 지정된 기간 동안 error budget과 latency 기준을 만족한다.
+- legacy fallback을 당장 켤 수 있는 상태로 보존한다.
+- 운영 승인 후에만 legacy Skill을 archive한다.
+
+### 12.13 전환 완료 체크리스트
+
+```text
+[ ] 기존 Skill-only baseline test 통과
+[ ] additive DB migration과 rollback 검증
+[ ] Test Plugin이 server registry에 등록됨
+[ ] Test Plugin Skill이 PostgreSQL에서 조회됨
+[ ] Test Plugin runtime contract test 통과
+[ ] Test Plugin Agent 실행과 checkpoint resume 통과
+[ ] disabled/unauthorized Plugin 차단 확인
+[ ] timeout/failure/cache invalidation 검증
+[ ] canary flag와 legacy fallback 검증
+[ ] 실제 read-only Skill 1개 전환 완료
+[ ] Plugin 수 증가 benchmark 통과
+[ ] version pin과 rollback runbook 완료
+```
+
+## 13. 완료 조건
 
 ### 기능
 
@@ -719,6 +1073,16 @@ PostgreSQL
 - cold start와 warm start의 p50/p95를 별도로 관측한다.
 - profile 동시 생성이 singleflight로 중복되지 않는다.
 
+### 전환
+
+- 모든 legacy Skill-only golden task가 Plugin flag off 상태에서 통과한다.
+- Test Plugin이 server registry, Skill storage, runtime, Agent, audit까지 end-to-end로 검증된다.
+- Plugin Resolver 실패 시 안전한 범위에서 legacy fallback이 작동한다.
+- side-effect가 있는 Plugin 오류에 대해 자동 legacy 재실행을 하지 않는다.
+- canary tenant와 rollback flag가 운영 환경에서 검증된다.
+- 실제 read-only Skill 1개 이상이 rollback 가능한 상태로 Plugin 전환된다.
+- Plugin version pin, migration rollback, runtime rollback 절차가 문서화되어 있다.
+
 ### 보안
 
 - 사용자가 권한 없는 Plugin을 활성화할 수 없다.
@@ -727,7 +1091,7 @@ PostgreSQL
 - 다른 tenant의 Skill, Tool, browser session이 노출되지 않는다.
 - 고위험 side effect는 승인 없이 실행되지 않는다.
 
-## 13. 조사 출처
+## 14. 조사 출처
 
 - [Deep Agents PyPI](https://pypi.org/project/deepagents/)
 - [Deep Agents 0.4.0 PyPI](https://pypi.org/project/deepagents/0.4.0/)
@@ -748,7 +1112,7 @@ PostgreSQL
 - [PostgreSQL License](https://www.postgresql.org/about/licence/)
 - [pgvector](https://github.com/pgvector/pgvector)
 
-## 14. 추가 결정이 필요한 항목
+## 15. 추가 결정이 필요한 항목
 
 이 문서 작성과 초기 MVP에는 추가 정보가 필요하지 않다. 구현을 시작할 때 아래 항목만 확정하면 된다.
 
@@ -761,6 +1125,9 @@ PostgreSQL
 7. static Typed Tool과 progressive discovery 전환 임계값
 8. profile cache TTL, invalidation, warm-up 정책
 9. cold/warm latency와 first-token latency의 목표 p95
+10. Test Plugin의 staging runtime 배포 방식
+11. canary tenant 선정 기준과 rollback owner
+12. legacy Skill fallback을 유지할 기간
 
 초기 구현 권장안은 다음과 같다.
 
