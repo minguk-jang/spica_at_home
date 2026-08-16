@@ -20,13 +20,13 @@
 
 ### 핵심 원칙
 
-1. **하나의 안정적인 Base Graph를 유지한다.**
+1. **하나의 공통 Agent assembly source와 안정적인 Base Graph를 기본으로 유지한다.**
 2. `deep_reference`를 capability와 예산의 상한선으로 정의한다.
-3. `quick`은 deep graph의 복사본이 아니라 제한된 `RunProfile`이다.
+3. `quick`은 원칙적으로 deep graph의 복사본이 아니라 제한된 `RunProfile`이다.
 4. profile은 thread 또는 run 시작 시점에 고정하고 실행 중에는 변경하지 않는다.
 5. safety, approval, tenant 권한은 effort와 분리한다.
 6. deep 기능은 한 번에 모두 넣지 않고 planning, budget, browser, research 순서로 확장한다.
-7. 별도 graph는 기본 경로가 아니라, 공통 graph와 호환되지 않는 state schema가 생겼을 때만 ADR을 거쳐 도입한다.
+7. v0.4 기본 middleware 때문에 quick의 overhead를 제거할 수 없거나 state schema가 호환되지 않을 때만, 같은 assembly와 contract에서 profile별 compiled bundle을 만든다. 수동으로 유지하는 별도 root graph는 만들지 않는다.
 
 ## 2. 실행 모델
 
@@ -34,7 +34,8 @@
 요청
   -> tenant/auth/capability 확인
   -> immutable RunProfile 선택
-  -> 하나의 Base Graph 실행
+  -> AgentBundle 선택 및 실행
+       ├── 공통 Base Graph 또는 측정된 profile bundle
        ├── planning
        ├── tool dispatch
        ├── browser/research capability
@@ -69,7 +70,50 @@ deep_reference
       quick
 ```
 
-### 2.2 실행 중 profile 변경 금지
+### 2.2 선행 Agent 구조
+
+Deep milestone을 시작하기 전에 다음 경계를 코드에 존재시킨다. 실제 클래스명과 디렉터리명은 저장소에 맞게 정하되, 책임은 분리되어야 한다.
+
+```text
+API / CLI / Worker entrypoint
+  -> RunCoordinator
+      -> Auth / Tenant / Capability / RunProfile
+      -> AgentFactory
+          -> immutable AgentBundle
+              -> AgentRunner
+                  -> common middleware
+                  -> ToolGateway
+                  -> ChildWorkerGateway
+  -> Checkpoint / Audit / Result
+```
+
+필수 구성:
+
+- `RunCoordinator` 또는 동등한 단일 실행 조정자: API, queue worker, resume 경로가 직접 Agent를 생성하거나 호출하지 않게 한다.
+- `AgentFactory`와 immutable `AgentBundle`: graph 생성, middleware 조합, Tool surface 선택, profile metadata를 한 곳에서 관리한다.
+- `AgentRunner`: invoke, stream, resume의 공통 계약을 제공한다.
+- `RunContext`: `run_id`, `thread_id`, tenant, profile, capability snapshot, deadline, policy version을 보관하는 immutable context다.
+- `AgentState`: messages, todo, plan, evidence, tool result, budget ledger처럼 checkpoint 가능한 상태만 보관한다.
+- `RuntimeHandles`: browser page, connection, client, mutable session처럼 checkpoint와 graph cache에 넣으면 안 되는 일시 객체다.
+- `EffortPolicy`와 `SafetyPolicy`: planning, budget, subagent와 권한, approval, allowed domain을 서로 다른 정책으로 관리한다.
+- `ToolGateway`: precondition, auth, budget, approval, execute, observe, postcondition, audit를 공통 경계에서 처리한다.
+- `ChildWorkerGateway`: child profile, capability allowlist, deadline, budget slice, output schema를 전달한다.
+
+`AgentBundle`은 다음처럼 profile별 compiled bundle을 수용할 수 있어야 한다.
+
+```python
+@dataclass(frozen=True)
+class AgentBundle:
+    runner: Runnable
+    profile_id: str
+    policy_version: str
+    tool_surface_hash: str
+    graph_schema_version: str
+```
+
+기본 구현은 하나의 Base Graph와 runtime policy를 사용한다. 다만 Deep Agents 0.4.x의 기본 planning/subagent middleware를 실제로 제거할 수 없는 경우, Factory가 같은 state schema, Tool contract, middleware source에서 quick/deep bundle을 만들 수 있어야 한다. 이 fallback은 D-1에서 준비만 하고, 선택 여부는 D5 benchmark 이후 결정한다.
+
+### 2.3 실행 중 profile 변경 금지
 
 기존 Plugin 설계의 immutable capability snapshot 원칙을 그대로 적용한다.
 
@@ -87,15 +131,15 @@ deep_reference
 
 | 기존 내용 | 판정 | 이번 문서의 정리 |
 |---|---|---|
-| 고정 Base Graph | 일치 | deep과 quick 모두 같은 graph를 사용한다. |
+| 고정 Base Graph | 방향 일치 | 공통 assembly source와 하나의 Base Graph를 기본으로 하되, v0.4 overhead가 측정되면 같은 assembly에서 profile bundle을 만든다. |
 | runtime context와 immutable snapshot | 일치 | RunProfile도 snapshot 경계에서 고정한다. |
 | 실행 중 Tool schema mutation 금지 | 일치 | profile 변경은 새 run에서만 수행한다. |
 | HTTP Plugin을 MVP로 사용 | 일치 | deep milestone 초반에는 Plugin DB를 기다리지 않고 static fixture로 검증한다. |
 | Plugin-specific subgraph는 복잡한 workflow에만 사용 | 일치 | deep baseline에서는 별도 supervisor graph를 만들지 않는다. |
-| 0.4.x 유지 후 0.7 upgrade 평가 | 일치 | D7에서 별도 branch로 평가한다. |
+| 0.4.x 유지 후 0.7 upgrade 평가 | 일치 | D7에서 별도 branch로 평가한다. 단, D-1의 구조적 seam을 먼저 확보한다. |
 | Core-only fast path | 순서 변경 | 먼저 deep 기준을 만들고, 그 후 quick 제한을 fast path로 검증한다. |
 | Phase 3에서 첫 Plugin 구현 | 순서 변경 | agent execution contract가 안정된 뒤 실제 Plugin runtime을 연결한다. |
-| Agent Profile Cache | 보완 | graph를 profile별로 복제하지 않고, immutable definition과 runtime policy를 분리한다. |
+| Agent Profile Cache | 보완 | immutable AgentBundle definition과 runtime context, mutable connection을 분리하고 Factory에서 build spec별로 cache한다. |
 
 기존 문서의 Plugin Registry, PostgreSQL, capability snapshot, transport 선택 milestone은 유지한다. 이번 문서는 그 위에 올라가는 **agent execution depth의 순서**만 정의한다.
 
@@ -115,7 +159,8 @@ deep_reference
 따라서 실행 순서는 다음처럼 분리한다.
 
 ```text
-agent depth 기준선과 실행 계약
+D-1 agent 구조와 리팩토링 경계
+  -> D0 현재 quick baseline과 실행 계약
   -> deep browser/research capability
   -> quick profile 도출
   -> Plugin runtime 연결
@@ -210,6 +255,63 @@ Deep Agents 공식 Deep Research 예제도 처음부터 Open Deep Research 전�
 
 ## 6. 단계별 Milestone
 
+### D-1. Agent 구조 및 리팩토링 준비
+
+목표: 저장소별 구현을 추측하지 않고, D0 이후의 deep/quick 변경이 들어갈 수 있는 안전한 구조적 seam을 먼저 만든다.
+
+D-1은 대규모 재작성 단계가 아니다. 현재 quick 동작을 pass-through로 보존하면서 Agent 생성, 실행, Tool, state, checkpoint의 책임을 분리하는 단계다.
+
+작업:
+
+1. **Read-only 구조 조사**
+   - Agent 생성 함수와 모든 호출자
+   - graph 생성 및 compile 위치
+   - middleware 등록 순서와 Deep Agents 기본 middleware
+   - Tool registry, Tool factory, retry/timeout 위치
+   - subagent 생성과 child state 전달 위치
+   - browser session/page 생성, 해제, 재사용 위치
+   - streaming, interrupt, checkpoint, resume 경로
+   - 테스트와 실제 실행/배포 진입점
+2. **구조 산출물 작성**
+   - `agent-architecture-inventory.md`
+   - `agent-entrypoint-callgraph.md`
+   - `agent-state-and-checkpoint-contract.md`
+   - `agent-refactor-risk-register.md`
+   - 각 산출물에는 실제 파일 경로, symbol, 호출 흐름, 확인되지 않은 가정을 기록한다.
+3. **Pass-through seam 추가**
+   - `RunCoordinator` 또는 동등한 실행 조정자
+   - `RunContext`, `AgentState`, `RuntimeHandles` 분리
+   - `AgentFactory`와 immutable `AgentBundle`
+   - `AgentRunner`의 invoke/stream/resume 계약
+   - 모든 Tool이 통과하는 `ToolGateway`
+   - child worker에 profile과 budget을 전달하는 경계
+4. **계약 테스트 추가**
+   - 기존 quick golden task 결과와 Tool sequence 보존
+   - checkpoint/resume와 HITL 동작 보존
+   - concurrent run 간 profile, tenant, browser session leakage 차단
+   - secret이 state, trace, checkpoint에 기록되지 않음
+   - 기존 API response와 streaming contract 보존
+   - AgentFactory가 실행 중 graph나 profile을 mutation하지 않음
+
+하지 않는 것:
+
+- deep 기능 활성화
+- Plugin Registry, MCP, researcher, browser-specialist 추가
+- snapshot serializer 전면 개편
+- quick/deep graph를 수동으로 복사
+- prompt만으로 budget, retry, permission을 강제
+
+완료 조건:
+
+- Agent를 직접 호출하는 진입점이 Coordinator/Runner 뒤로 모인다.
+- Agent 생성과 compile이 Factory 뒤로 숨겨진다.
+- Context, checkpoint state, ephemeral runtime handle이 구분된다.
+- EffortPolicy와 SafetyPolicy가 구분된다.
+- 모든 side-effect 가능 Tool에 공통 precondition/approval/postcondition 경계가 있다.
+- 기존 quick이 pass-through profile로 같은 결과를 낸다.
+- 하나의 Base Graph와 profile별 compiled bundle 중 어느 방식을 선택할지 benchmark로 결정할 수 있다.
+- D-1 변경 자체의 latency와 regression이 기록된다.
+
 ### D0. 현재 quick baseline 고정
 
 목표: 현재 quick의 동작을 control group으로 보존한다.
@@ -241,7 +343,7 @@ Deep Agents 공식 Deep Research 예제도 처음부터 Open Deep Research 전�
 
 작업:
 
-- 현재 Base Graph를 기준 graph로 고정
+- D-1에서 만든 공통 assembly source와 현재 Base Graph를 기준으로 고정
 - `deep_reference` RunProfile을 추가
 - planning, context management, retry, finalization을 deep 기준으로 활성화
 - 현재 browser/tool contract를 common layer로 이동
@@ -254,7 +356,8 @@ Deep Agents 공식 Deep Research 예제도 처음부터 Open Deep Research 전�
 
 - deep_reference가 기존 quick보다 긴 multi-step task를 완주한다.
 - 기존 quick golden task는 동일하게 통과한다.
-- deep_reference와 quick이 별도 root graph를 사용하지 않는다.
+- deep_reference와 quick이 수동으로 유지하는 별도 root graph fork를 사용하지 않는다.
+- 기본은 하나의 Base Graph이며, v0.4 기본 middleware 때문에 profile bundle이 필요하면 동일한 Factory와 state/tool contract에서 생성된다.
 
 ### D2. Deep control plane
 
@@ -357,7 +460,7 @@ search
 - quick에서 subagent와 interactive browser가 실행되지 않는다.
 - deep 기능을 다시 켤 때 graph source를 복제하지 않는다.
 
-만약 v0.4에서 model-facing tool filtering이 불안정하면 우선 stable dispatch surface와 execution guard를 사용한다. quick의 tool schema 비용이 실제 SLO를 넘을 때만 별도 worker optimization을 검토한다. 별도 root graph는 자동으로 만들지 않는다.
+만약 v0.4에서 model-facing tool filtering이 불안정하면 우선 stable dispatch surface와 execution guard를 사용한다. quick의 tool schema와 기본 middleware 비용이 실제 SLO를 넘을 때만 D-1 Factory가 profile bundle을 생성하도록 한다. 이 경우에도 state, Tool contract, middleware source는 공유하고 수동 graph fork는 만들지 않는다.
 
 ### D6. Plugin capability snapshot 연결
 
@@ -458,7 +561,7 @@ profile이 달라도 다음 safety invariant는 바뀌지 않는다.
 
 ### 지금 업데이트하지 않는 조건
 
-- v0.4에서 하나의 Base Graph와 policy middleware로 D1-D5가 구현됨
+- v0.4에서 공통 assembly와 Base Graph 또는 측정된 profile bundle로 D1-D5가 구현됨
 - quick/deep tool surface를 execution guard로 충분히 제한할 수 있음
 - 현재 dependency와 checkpoint가 안정적임
 - 최신 HarnessProfile이 필요한 명확한 문제가 없음
@@ -499,16 +602,18 @@ profile이 달라도 다음 safety invariant는 바뀌지 않는다.
 
 ### Maintainability gate
 
-- root graph source는 하나
+- Agent assembly source는 하나
 - 공통 Tool contract source는 하나
 - 공통 budget/approval middleware source는 하나
 - profile별 차이는 정책 데이터와 capability manifest로 표현
-- 두 번째 root graph 도입은 ADR과 benchmark 승인 필요
+- 하나의 Base Graph를 기본으로 사용하되, profile bundle은 ADR과 benchmark 승인 후에만 허용
+- 두 번째 root graph를 수동으로 유지하지 않음
 
 ## 10. 권장 실행 순서 요약
 
 ```text
-D0 현재 quick baseline 고정
+D-1 agent 구조 및 리팩토링 경계
+  -> D0 현재 quick baseline 고정
   -> D1 deep_reference skeleton
   -> D2 deep control plane
   -> D3 deep browser
@@ -519,7 +624,7 @@ D0 현재 quick baseline 고정
   -> D8 필요할 때만 workflow/subgraph 승격
 ```
 
-현재 quick만 안정적인 상태라면 D0에서 기능을 더 쌓기보다, D1에서 동일한 Base Graph를 deep 기준으로 확장하는 것이 핵심이다. quick은 나중에 deep의 제한된 view로 만든다.
+현재 quick만 안정적인 상태라면 먼저 D-1에서 저장소의 Agent 경계를 확인하고 pass-through seam을 만든다. 그 다음 D0에서 quick을 고정하고, D1에서 공통 assembly를 deep 기준으로 확장한다. quick은 나중에 deep의 제한된 view로 만들되, v0.4의 실제 overhead가 크면 같은 assembly에서 profile bundle을 선택한다.
 
 ## 참고 자료
 
